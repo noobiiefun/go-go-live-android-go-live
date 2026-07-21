@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Go Go Live</string>
+    <string name="label_rtmp_url">RTMP URL YouTube (rtmp://a.rtmp.youtube.com/live2)</string>
+    <string name="label_stream_key">Stream Key YouTube</string>
+    <string name="btn_start">Mulai Live</string>
+    <string name="btn_stop">Stop Live</string>
+    <string name="status_idle">Status: belum live</string>
+    <string name="status_live">Status: LIVE 🔴</string>
+    <string name="status_connecting">Status: menghubungkan…</string>
+    <string name="status_failed">Status: gagal terhubung</string>
+    <string name="notif_channel_name">Live Streaming</string>
+    <string name="notif_title">Go Go Live sedang live</string>
+    <string name="notif_content">Merekam &amp; menyiarkan seluruh layar</string>
+    <string name="toast_isi_dulu">Isi RTMP URL dan Stream Key dulu</string>
+</resources>
