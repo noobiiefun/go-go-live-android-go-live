@@ -5,10 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -18,8 +19,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.gogolive.androidgo.R
 import com.gogolive.androidgo.ui.MainActivity
-import com.pedro.rtplibrary.rtmp.RtmpDisplay
-import net.ossrs.rtmp.ConnectCheckerRtmp
+import com.pedro.common.ConnectChecker
+import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.encoder.input.sources.video.NoVideoSource
+import com.pedro.encoder.input.sources.video.ScreenSource
+import com.pedro.library.generic.GenericStream
 
 /**
  * Service ini adalah "otak" dari aplikasi.
@@ -29,9 +33,10 @@ import net.ossrs.rtmp.ConnectCheckerRtmp
  * - Satu-satunya yang terlihat ke user adalah notifikasi wajib di status bar
  *   (itu aturan Android supaya user selalu tahu layarnya sedang direkam/disiarkan).
  * - Tidak ada izin "Draw over other apps" / SYSTEM_ALERT_WINDOW yang dipakai di sini.
- * - Karena berjalan sebagai Service (bukan Activity), aplikasi lain tetap bisa
- *   dipakai secara normal selama live berjalan - cocok untuk Android Go yang
- *   RAM-nya terbatas karena kita hindari overhead window overlay.
+ *
+ * Pakai library RootEncoder versi 2.7.3 (GenericStream + ScreenSource), versi yang
+ * aktif dikembangkan - versi lama (2.2.6/RtmpDisplay) sering gagal di-resolve Jitpack
+ * pada Android Studio versi baru.
  *
  * DUKUNGAN ROTASI (vertikal/horizontal, untuk kasus spacedesk PC->HP):
  * MediaProjection membuat "kanvas" capture dengan ukuran TETAP saat pertama kali
@@ -39,14 +44,17 @@ import net.ossrs.rtmp.ConnectCheckerRtmp
  * dari mode potrait ke landscape), video akan terlihat gepeng/terpotong kalau
  * kanvas lama dipertahankan. Solusinya di sini: begitu sistem melaporkan
  * perubahan orientasi lewat onConfigurationChanged(), stream RTMP lama
- * dihentikan sebentar lalu dibuat ulang dengan ukuran layar yang baru
- * (izin MediaProjection yang sudah didapat tetap dipakai ulang, user TIDAK
- * akan diminta izin lagi). Ada jeda beberapa ratus milidetik saat proses ini,
- * itu wajar dan jauh lebih baik daripada video gepeng permanen.
+ * dihentikan sebentar lalu dibuat ulang dengan ukuran layar yang baru.
+ * MediaProjection token yang sama dipakai ulang - user TIDAK akan diminta
+ * konfirmasi izin lagi. Ada jeda beberapa ratus milidetik saat proses ini.
  */
-class ScreenRecordService : Service(), ConnectCheckerRtmp {
+class ScreenRecordService : Service(), ConnectChecker {
 
-    private var rtmpDisplay: RtmpDisplay? = null
+    private lateinit var genericStream: GenericStream
+    private val mediaProjectionManager: MediaProjectionManager by lazy {
+        getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    }
+    private var mediaProjection: MediaProjection? = null
 
     // Disimpan supaya bisa dipakai ulang saat restart akibat rotasi,
     // tanpa perlu minta izin MediaProjection lagi ke user.
@@ -57,6 +65,12 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
     private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingRestart: Runnable? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        // NoVideoSource() = placeholder sebelum ScreenSource asli dipasang setelah izin didapat.
+        genericStream = GenericStream(baseContext, this, NoVideoSource(), MicrophoneSource())
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -85,50 +99,63 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
         lastOrientation = resources.configuration.orientation
 
         startForegroundWithNotification()
-        startEncoding()
+        startEncoding(isRestart = false)
     }
 
-    /** Membuat RtmpDisplay baru dan mulai streaming, memakai ukuran layar TERKINI. */
-    private fun startEncoding() {
+    /** Menyiapkan encoder + ScreenSource baru dan mulai streaming, memakai ukuran layar TERKINI. */
+    private fun startEncoding(isRestart: Boolean) {
         val data = savedResultData ?: return
 
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
-        rtmpDisplay = RtmpDisplay(baseContext, true, this).apply {
-            setIntentResult(savedResultCode, data)
+        if (isRestart) {
+            mediaProjection?.stop()
         }
-
-        val prepared = rtmpDisplay?.prepareVideo(
-            metrics.widthPixels,
-            metrics.heightPixels,
-            FPS,
-            VIDEO_BITRATE,
-            0,
-            metrics.densityDpi
-        ) ?: false
-
-        val audioPrepared = rtmpDisplay?.prepareAudio() ?: false
-
-        if (prepared && audioPrepared) {
-            rtmpDisplay?.startStream(savedRtmpUrl)
-            Log.d(TAG, "Encoding dimulai pada ${metrics.widthPixels}x${metrics.heightPixels}")
-        } else {
-            Log.e(TAG, "Gagal menyiapkan encoder video/audio")
+        val projection = mediaProjectionManager.getMediaProjection(savedResultCode, data)
+        if (projection == null) {
+            Log.e(TAG, "Gagal mendapatkan MediaProjection")
             stopSelf()
+            return
         }
+        mediaProjection = projection
+
+        val prepared = try {
+            genericStream.prepareVideo(metrics.widthPixels, metrics.heightPixels, VIDEO_BITRATE, FPS) &&
+                genericStream.prepareAudio(AUDIO_SAMPLE_RATE, true, AUDIO_BITRATE)
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "Gagal prepare video/audio: ${e.message}")
+            false
+        }
+
+        if (!prepared) {
+            Log.e(TAG, "Encoder video/audio tidak siap, berhenti")
+            stopSelf()
+            return
+        }
+
+        try {
+            genericStream.changeVideoSource(ScreenSource(baseContext, projection))
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "Gagal memasang ScreenSource: ${e.message}")
+            stopSelf()
+            return
+        }
+
+        genericStream.startStream(savedRtmpUrl)
+        Log.d(TAG, "Encoding dimulai pada ${metrics.widthPixels}x${metrics.heightPixels}")
     }
 
     /**
      * Dipanggil otomatis oleh Android setiap kali konfigurasi berubah,
-     * termasuk saat rotasi layar potrait <-> landscape. Tidak perlu
-     * didaftarkan manual di manifest untuk Service.
+     * termasuk saat rotasi layar potrait <-> landscape.
      */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
 
-        if (rtmpDisplay == null) return // belum mulai streaming, abaikan
+        if (!this::genericStream.isInitialized) return
+        if (savedResultData == null) return // belum mulai streaming, abaikan
         if (newConfig.orientation == lastOrientation) return // bukan perubahan orientasi
 
         lastOrientation = newConfig.orientation
@@ -143,24 +170,25 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
     }
 
     private fun restartEncodingForNewOrientation() {
-        if (rtmpDisplay?.isStreaming == true) {
-            rtmpDisplay?.stopStream()
+        if (genericStream.isStreaming) {
+            genericStream.stopStream()
         }
-        rtmpDisplay = null
-        startEncoding()
+        startEncoding(isRestart = true)
     }
 
     private fun handleStop() {
         pendingRestart?.let { mainHandler.removeCallbacks(it) }
-        if (rtmpDisplay?.isStreaming == true) {
-            rtmpDisplay?.stopStream()
+        if (this::genericStream.isInitialized && genericStream.isStreaming) {
+            genericStream.stopStream()
         }
+        mediaProjection?.stop()
+        mediaProjection = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private val windowManager
-        get() = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        get() = getSystemService(WINDOW_SERVICE) as android.view.WindowManager
 
     private fun startForegroundWithNotification() {
         val channelId = "go_go_live_channel"
@@ -193,47 +221,54 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
 
-    // ---- Callback status koneksi RTMP dari RootEncoder ----
+    // ---- Callback status koneksi dari RootEncoder (interface ConnectChecker terpadu) ----
 
-    override fun onConnectionSuccessRtmp() {
+    override fun onConnectionStarted(url: String) {
+        Log.d(TAG, "Mulai konek ke $url")
+    }
+
+    override fun onConnectionSuccess() {
         Log.d(TAG, "RTMP terhubung, live dimulai")
     }
 
-    override fun onConnectionFailedRtmp(reason: String) {
+    override fun onConnectionFailed(reason: String) {
         Log.e(TAG, "RTMP gagal konek: $reason")
         handleStop()
     }
 
-    override fun onNewBitrateRtmp(bitrate: Long) {
+    override fun onNewBitrate(bitrate: Long) {
         // opsional: bisa dipakai untuk menampilkan bitrate real-time di notifikasi
     }
 
-    override fun onDisconnectRtmp() {
+    override fun onDisconnect() {
         Log.d(TAG, "RTMP terputus")
     }
 
-    override fun onAuthErrorRtmp() {
+    override fun onAuthError() {
         Log.e(TAG, "RTMP auth error - cek stream key")
         handleStop()
     }
 
-    override fun onAuthSuccessRtmp() {
+    override fun onAuthSuccess() {
         Log.d(TAG, "RTMP auth sukses")
     }
 
     override fun onDestroy() {
         super.onDestroy()
         pendingRestart?.let { mainHandler.removeCallbacks(it) }
-        if (rtmpDisplay?.isStreaming == true) {
-            rtmpDisplay?.stopStream()
+        if (this::genericStream.isInitialized && genericStream.isStreaming) {
+            genericStream.stopStream()
         }
+        mediaProjection?.stop()
+        mediaProjection = null
     }
 
     companion object {
@@ -241,6 +276,8 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
         private const val NOTIFICATION_ID = 1001
         private const val VIDEO_BITRATE = 3_000 * 1000 // 3 Mbps, cukup untuk 30fps di Android Go
         private const val FPS = 30
+        private const val AUDIO_SAMPLE_RATE = 44100
+        private const val AUDIO_BITRATE = 128 * 1000
         private const val ORIENTATION_DEBOUNCE_MS = 500L
 
         const val ACTION_START = "com.gogolive.androidgo.action.START"

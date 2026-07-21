@@ -144,7 +144,27 @@ di layar.
 
 
 
-## Dukungan layar vertikal & horizontal (kasus PC kentang + spacedesk)
+## Update: pindah ke RootEncoder versi 2.7.3
+
+Versi awal project ini pakai library RootEncoder versi lama (2.2.6, class
+`RtmpDisplay`). Versi itu sering gagal di-resolve Jitpack di Android Studio
+versi baru (error "Unresolved reference: net", "ConnectCheckerRtmp" dst).
+
+Sekarang project ini pakai versi RootEncoder yang aktif dikembangkan (2.7.3),
+dengan API baru:
+- `GenericStream` (pengganti `RtmpDisplay`)
+- `ScreenSource` (video source untuk capture layar)
+- `MicrophoneSource` (audio source)
+- `ConnectChecker` (pengganti `ConnectCheckerRtmp`, interface terpadu untuk semua protokol)
+
+**Kalau Android Studio menandai merah baris `import com.pedro.library.generic.GenericStream`**
+(garis bawah merah tapi build lain semua sukses), klik kursor di kata
+`GenericStream` lalu tekan **Alt+Enter** → pilih "Import class" — Android
+Studio akan otomatis mendeteksi package yang benar dari library yang sudah
+ter-download. Ini bisa terjadi kalau ada penyesuaian kecil struktur package
+antar versi minor library.
+
+
 
 Aplikasi ini **tidak mengunci orientasi** — bebas dipakai potrait maupun
 landscape, cocok untuk skenario spacedesk (PC lawas jadi extended

@@ -45,6 +45,7 @@ dependencies {
     implementation 'androidx.core:core-splashscreen:1.0.1'
 
     // Library untuk encode H264/AAC dan kirim RTMP dari MediaProjection (capture seluruh layar)
-    // https://github.com/pedroSG94/RootEncoder
-    implementation 'com.github.pedroSG94.RootEncoder:rtplibrary:2.2.6'
+    // https://github.com/pedroSG94/RootEncoder - versi 2.7.3 (versi lama 2.2.6 sering gagal
+    // resolve di Jitpack pada setup Android Studio baru, jadi pakai versi aktif ini)
+    implementation("com.github.pedroSG94.RootEncoder:library:2.7.3")
 }
