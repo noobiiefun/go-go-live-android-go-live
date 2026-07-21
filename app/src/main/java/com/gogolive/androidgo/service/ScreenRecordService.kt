@@ -171,8 +171,8 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
     companion object {
         private const val TAG = "ScreenRecordService"
         private const val NOTIFICATION_ID = 1001
-        private const val VIDEO_BITRATE = 2_500 * 1000 // 2.5 Mbps, aman untuk Android Go
-        private const val FPS = 24
+        private const val VIDEO_BITRATE = 3_000 * 1000 // 3 Mbps, cukup untuk 30fps di Android Go
+        private const val FPS = 30
 
         const val ACTION_START = "com.gogolive.androidgo.action.START"
         const val ACTION_STOP = "com.gogolive.androidgo.action.STOP"

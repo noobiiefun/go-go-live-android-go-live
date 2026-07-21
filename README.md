@@ -56,14 +56,46 @@ mengirimkannya via protokol RTMP, tanpa perlu root.
 4. Tekan **Mulai Live**, setujui dialog capture layar, live akan muncul di
    YouTube Studio setelah beberapa detik.
 
+## Ini live streaming langsung, BUKAN "rekam dulu baru upload"
+
+`ScreenRecordService` hanya memanggil `prepareVideo()` + `prepareAudio()` lalu
+`startStream(rtmpUrl)` — **tidak pernah** memanggil `startRecord()` dari library
+RootEncoder. Artinya alurnya adalah:
+
+```
+Layar HP → encoder H264/AAC (di RAM) → dikirim langsung via RTMP ke YouTube
+```
+
+Tidak ada file video yang ditulis ke penyimpanan HP sama sekali, jadi memori
+internal kamu **tidak akan penuh** walau live berjam-jam. Encoder cuma memproses
+frame di RAM lalu langsung mengirimnya ke internet, mirip cara kerja OBS di PC
+saat streaming (bukan cara kerja "record layar → convert → upload manual").
+
+Kalau suatu saat kamu justru **mau** menyimpan salinan lokal juga (misal untuk
+arsip), baru perlu ditambahkan pemanggilan `startRecord(path)` secara terpisah —
+tapi secara default proyek ini sudah didesain tidak menyimpan apa pun.
+
 ## Pengaturan yang sudah disesuaikan untuk Android Go
 
-- Bitrate video default `2.5 Mbps`, FPS `24` — cukup ringan untuk chipset kelas
-  entry Android Go, bisa diturunkan lagi di `ScreenRecordService.kt`
-  (`VIDEO_BITRATE`, `FPS`) kalau masih lag.
-- Resolusi capture memakai resolusi asli layar (via `DisplayMetrics`), bisa
-  diturunkan (misal dibagi 2) di `handleStart()` kalau perangkat kurang kuat.
+- Bitrate video default `3 Mbps`, FPS `30` — sudah dinaikkan dari versi awal
+  (24fps) supaya gerakan tidak patah-patah. Kalau chipset Redmi A3 kamu masih
+  keteteran di 30fps, ada 2 opsi di `ScreenRecordService.kt`:
+  1. Turunkan lagi `FPS` (misal ke 25) sambil bitrate tetap.
+  2. **Lebih efektif kalau masih patah-patah:** turunkan **resolusi**, bukan fps
+     — di `handleStart()` bagi `metrics.widthPixels`/`metrics.heightPixels`
+     dengan 1.5 atau 2 sebelum dipakai di `prepareVideo()`. Resolusi lebih
+     ringan buat encoder daripada menaikkan fps, dan biasanya penyebab patah
+     di HP kelas Go adalah CPU/encoder kewalahan menyamai resolusi asli, bukan
+     fps-nya.
+- Resolusi capture memakai resolusi asli layar (via `DisplayMetrics`).
 - `minSdk 26` (Android Oreo) karena semua perangkat Android Go minimal Oreo.
+
+**Catatan teknis penting soal "patah-patah":** MediaProjection API Android
+hanya menghasilkan frame baru saat ada *perubahan* di layar. Kalau layar diam
+total (misal cuma nampilkan teks statis), fps otomatis turun sendiri walau
+sudah di-set 30 — ini keterbatasan Android, bukan bug aplikasi. Kalau butuh
+konten selalu mulus (misal main game), pastikan ada animasi/gerakan terus-menerus
+di layar.
 
 ## Batasan yang perlu diketahui
 
