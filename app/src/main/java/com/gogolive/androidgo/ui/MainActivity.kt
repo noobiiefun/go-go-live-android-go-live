@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.gogolive.androidgo.R
 import com.gogolive.androidgo.databinding.ActivityMainBinding
 import com.gogolive.androidgo.service.ScreenRecordService
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     ) { /* granted or not, kita tetap lanjut - notifikasi cuma informatif */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)

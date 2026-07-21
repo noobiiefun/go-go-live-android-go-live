@@ -109,7 +109,40 @@ di layar.
   butuh `AudioPlaybackCaptureConfiguration` (Android 10+) — bisa ditambahkan
   sebagai pengembangan lanjutan.
 
-## Upload ke GitHub
+## Mengganti icon aplikasi & splash screen
+
+**File yang kamu siapkan cukup 1-2 file:**
+
+| Kebutuhan | Format | Ukuran ideal |
+|---|---|---|
+| Icon aplikasi | PNG latar transparan, persegi | 1024×1024 px (kasih padding ±15% dari tepi) |
+| Logo splash screen | PNG latar transparan, persegi | 512×512 px (boleh sama dengan icon) |
+
+**Ganti icon aplikasi:**
+1. Buka `app/src/main/res/drawable/ic_launcher_foreground.xml` — hapus isinya
+   atau ganti pendekatan: taruh file `ic_launcher_foreground.png` kamu di
+   folder yang sama, lalu update
+   `app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` supaya
+   `<foreground android:drawable="@drawable/ic_launcher_foreground" />` merujuk
+   ke PNG barumu (hapus file `.xml` lamanya).
+2. Cara paling gampang & otomatis: klik kanan folder `app` di Android Studio →
+   **New → Image Asset** → pilih source PNG 1024x1024 kamu → Android Studio
+   otomatis generate semua ukuran mipmap yang dibutuhkan.
+3. Warna latar adaptive icon (kotak solid di belakang logo) ada di
+   `app/src/main/res/drawable/ic_launcher_background.xml`, ganti kode warnanya
+   sesuai brand kamu.
+
+**Ganti logo splash screen:**
+1. Hapus `app/src/main/res/drawable/ic_logo_splash.xml` (placeholder).
+2. Taruh file logo kamu dengan nama persis `ic_logo_splash.png` di folder yang
+   sama (`app/src/main/res/drawable/`).
+3. Ganti warna latar splash di `app/src/main/res/values/colors.xml`
+   (`splash_background`) sesuai brand kamu.
+4. Tidak perlu ubah kode lain — `Theme.GoGoLive.Splash` di `themes.xml` sudah
+   otomatis memakai file itu lewat `androidx.core:core-splashscreen`, yang
+   bekerja konsisten dari Android 5 sampai 14+ (termasuk di Android Go).
+
+
 
 ```bash
 cd go-go-live-android-go-live

@@ -4,4 +4,26 @@
         <item name="colorPrimaryVariant">@color/purple_500</item>
         <item name="colorOnPrimary">@color/white</item>
     </style>
+
+    <!--
+      Tema splash screen. Dipakai HANYA di AndroidManifest untuk MainActivity
+      (android:theme), lalu di kode di-switch balik ke Theme.GoGoLive setelah
+      splash selesai lewat installSplashScreen(). Ini pakai androidx
+      core-splashscreen supaya jalan konsisten dari Android 5 s.d. 14+,
+      termasuk di Android Go.
+    -->
+    <style name="Theme.GoGoLive.Splash" parent="Theme.SplashScreen">
+        <!-- Warna latar splash. Ganti sesuai warna brand kamu. -->
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+
+        <!--
+          Logo yang tampil di tengah splash.
+          GANTI file res/drawable/ic_logo_splash.xml (atau .png) dengan logo kamu.
+          Ukuran ideal sumber gambar: 512x512px, PNG transparan (lihat README).
+        -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_logo_splash</item>
+
+        <!-- Tema yang dipakai SETELAH splash selesai -->
+        <item name="postSplashScreenTheme">@style/Theme.GoGoLive</item>
+    </style>
 </resources>

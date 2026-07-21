@@ -20,6 +20,7 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:theme="@style/Theme.GoGoLive.Splash"
             android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
