@@ -8,8 +8,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -29,10 +32,31 @@ import net.ossrs.rtmp.ConnectCheckerRtmp
  * - Karena berjalan sebagai Service (bukan Activity), aplikasi lain tetap bisa
  *   dipakai secara normal selama live berjalan - cocok untuk Android Go yang
  *   RAM-nya terbatas karena kita hindari overhead window overlay.
+ *
+ * DUKUNGAN ROTASI (vertikal/horizontal, untuk kasus spacedesk PC->HP):
+ * MediaProjection membuat "kanvas" capture dengan ukuran TETAP saat pertama kali
+ * disiapkan. Kalau device/tampilan berputar setelah itu (misal spacedesk pindah
+ * dari mode potrait ke landscape), video akan terlihat gepeng/terpotong kalau
+ * kanvas lama dipertahankan. Solusinya di sini: begitu sistem melaporkan
+ * perubahan orientasi lewat onConfigurationChanged(), stream RTMP lama
+ * dihentikan sebentar lalu dibuat ulang dengan ukuran layar yang baru
+ * (izin MediaProjection yang sudah didapat tetap dipakai ulang, user TIDAK
+ * akan diminta izin lagi). Ada jeda beberapa ratus milidetik saat proses ini,
+ * itu wajar dan jauh lebih baik daripada video gepeng permanen.
  */
 class ScreenRecordService : Service(), ConnectCheckerRtmp {
 
     private var rtmpDisplay: RtmpDisplay? = null
+
+    // Disimpan supaya bisa dipakai ulang saat restart akibat rotasi,
+    // tanpa perlu minta izin MediaProjection lagi ke user.
+    private var savedResultCode: Int = -1
+    private var savedResultData: Intent? = null
+    private var savedRtmpUrl: String = ""
+
+    private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingRestart: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,14 +79,25 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
             return
         }
 
+        savedResultCode = resultCode
+        savedResultData = data
+        savedRtmpUrl = rtmpUrl
+        lastOrientation = resources.configuration.orientation
+
         startForegroundWithNotification()
+        startEncoding()
+    }
+
+    /** Membuat RtmpDisplay baru dan mulai streaming, memakai ukuran layar TERKINI. */
+    private fun startEncoding() {
+        val data = savedResultData ?: return
 
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
         rtmpDisplay = RtmpDisplay(baseContext, true, this).apply {
-            setIntentResult(resultCode, data)
+            setIntentResult(savedResultCode, data)
         }
 
         val prepared = rtmpDisplay?.prepareVideo(
@@ -77,14 +112,46 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
         val audioPrepared = rtmpDisplay?.prepareAudio() ?: false
 
         if (prepared && audioPrepared) {
-            rtmpDisplay?.startStream(rtmpUrl)
+            rtmpDisplay?.startStream(savedRtmpUrl)
+            Log.d(TAG, "Encoding dimulai pada ${metrics.widthPixels}x${metrics.heightPixels}")
         } else {
             Log.e(TAG, "Gagal menyiapkan encoder video/audio")
             stopSelf()
         }
     }
 
+    /**
+     * Dipanggil otomatis oleh Android setiap kali konfigurasi berubah,
+     * termasuk saat rotasi layar potrait <-> landscape. Tidak perlu
+     * didaftarkan manual di manifest untuk Service.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+
+        if (rtmpDisplay == null) return // belum mulai streaming, abaikan
+        if (newConfig.orientation == lastOrientation) return // bukan perubahan orientasi
+
+        lastOrientation = newConfig.orientation
+        Log.d(TAG, "Orientasi berubah, menyesuaikan ulang resolusi stream...")
+
+        // Debounce: rotasi bisa memicu beberapa callback beruntun selama animasi,
+        // jadi tunggu sebentar sampai rotasi selesai sebelum restart encoder.
+        pendingRestart?.let { mainHandler.removeCallbacks(it) }
+        val restartTask = Runnable { restartEncodingForNewOrientation() }
+        pendingRestart = restartTask
+        mainHandler.postDelayed(restartTask, ORIENTATION_DEBOUNCE_MS)
+    }
+
+    private fun restartEncodingForNewOrientation() {
+        if (rtmpDisplay?.isStreaming == true) {
+            rtmpDisplay?.stopStream()
+        }
+        rtmpDisplay = null
+        startEncoding()
+    }
+
     private fun handleStop() {
+        pendingRestart?.let { mainHandler.removeCallbacks(it) }
         if (rtmpDisplay?.isStreaming == true) {
             rtmpDisplay?.stopStream()
         }
@@ -163,6 +230,7 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
 
     override fun onDestroy() {
         super.onDestroy()
+        pendingRestart?.let { mainHandler.removeCallbacks(it) }
         if (rtmpDisplay?.isStreaming == true) {
             rtmpDisplay?.stopStream()
         }
@@ -173,6 +241,7 @@ class ScreenRecordService : Service(), ConnectCheckerRtmp {
         private const val NOTIFICATION_ID = 1001
         private const val VIDEO_BITRATE = 3_000 * 1000 // 3 Mbps, cukup untuk 30fps di Android Go
         private const val FPS = 30
+        private const val ORIENTATION_DEBOUNCE_MS = 500L
 
         const val ACTION_START = "com.gogolive.androidgo.action.START"
         const val ACTION_STOP = "com.gogolive.androidgo.action.STOP"

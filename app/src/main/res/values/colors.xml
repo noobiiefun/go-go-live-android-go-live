@@ -1,7 +1,7 @@
 <resources>
-    <color name="purple_500">#6200EE</color>
-    <color name="red_live">#E53935</color>
+    <color name="brand_blue">#0F5ED3</color>
+    <color name="red_live">#FC3B49</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="splash_background">#6200EE</color>
+    <color name="splash_background">#FEFEFE</color>
 </resources>

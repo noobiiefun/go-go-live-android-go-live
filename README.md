@@ -144,6 +144,55 @@ di layar.
 
 
 
+## Dukungan layar vertikal & horizontal (kasus PC kentang + spacedesk)
+
+Aplikasi ini **tidak mengunci orientasi** — bebas dipakai potrait maupun
+landscape, cocok untuk skenario spacedesk (PC lawas jadi extended
+display ke HP, lalu HP yang live streaming layarnya).
+
+Yang perlu kamu tahu soal cara kerjanya:
+
+- Saat live **dimulai**, aplikasi mengambil resolusi layar HP **pada saat itu**
+  (potrait atau landscape, sesuai kondisi layar HP waktu itu). Jadi kalau HP
+  kamu sedang landscape (disamakan sama layar PC via spacedesk), video live
+  juga otomatis landscape — tidak perlu setting manual.
+- Kalau **di tengah live** orientasi berubah (misal kamu putar HP, atau
+  spacedesk pindah mode tampilan), `ScreenRecordService` otomatis mendeteksi
+  perubahan itu lewat `onConfigurationChanged()`, lalu **me-restart stream
+  RTMP secara singkat** (kurang lebih setengah detik) dengan resolusi baru
+  yang sesuai. Izin capture layar yang sudah diberikan di awal **tetap
+  dipakai ulang** — user tidak akan diminta konfirmasi izin lagi.
+- Kenapa ada jeda restart, bukan langsung mulus? Karena MediaProjection
+  Android membuat "kanvas" capture dengan ukuran tetap saat pertama kali
+  disiapkan; kalau tidak di-restart saat orientasi berubah, videonya akan
+  gepeng/terpotong permanen sampai live dihentikan manual. Restart otomatis
+  ini jauh lebih baik daripada itu.
+- **Saran praktis:** kalau kamu tahu spacedesk akan selalu di satu orientasi
+  tertentu selama sesi live (misal selalu landscape mengikuti PC), lebih
+  baik set HP ke orientasi itu **sebelum** menekan "Mulai Live", supaya tidak
+  ada jeda restart sama sekali di tengah siaran.
+
+## Logo & branding
+
+Logo "GO GO LIVE — ANDROID GO LIVE" yang kamu berikan sudah dipasang ke:
+
+- **Icon aplikasi** (`ic_launcher_foreground.png` + `ic_launcher_background.xml`):
+  memakai simbol icon-nya saja (bubble chat + GO + tombol play + sinyal live),
+  background putih diambil transparan otomatis supaya menyatu rapi jadi
+  adaptive icon.
+- **Splash screen** (`ic_logo_splash.png`): simbol yang sama, tampil sekilas
+  saat aplikasi dibuka.
+- **Warna tema aplikasi** (`colors.xml`): diambil otomatis dari warna dominan
+  logo — biru `#0F5ED3` untuk warna utama, merah `#FC3B49` untuk tombol Stop.
+- File lockup lengkap (dengan tulisan "GO GO LIVE ANDROID GO LIVE") ikut
+  disimpan di `app/src/main/res/drawable/ic_full_logo_lockup.png` kalau
+  sewaktu-waktu mau dipakai di tempat lain (misal halaman "Tentang Aplikasi").
+
+Kalau mau ganti logo lagi nanti, tinggal ikuti panduan di bagian
+"Mengganti icon aplikasi & splash screen" di atas.
+
+## Upload ke GitHub
+
 ```bash
 cd go-go-live-android-go-live
 git init
