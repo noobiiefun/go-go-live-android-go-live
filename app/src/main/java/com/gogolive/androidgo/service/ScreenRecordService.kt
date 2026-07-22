@@ -121,6 +121,16 @@ class ScreenRecordService : Service(), ConnectChecker {
         }
         mediaProjection = projection
 
+        // WAJIB sejak Android 14: MediaProjection harus didaftarkan callback-nya SEBELUM
+        // dipakai untuk capture (createVirtualDisplay). Kalau tidak didaftarkan, sistem akan
+        // langsung throw IllegalStateException begitu capture dimulai - inilah penyebab
+        // force close yang terjadi persis setelah user memilih "seluruh layar" di dialog izin.
+        projection.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.d(TAG, "MediaProjection dihentikan oleh sistem (misal user cabut izin lewat status bar)")
+            }
+        }, mainHandler)
+
         val prepared = try {
             genericStream.prepareVideo(metrics.widthPixels, metrics.heightPixels, VIDEO_BITRATE, FPS) &&
                 genericStream.prepareAudio(AUDIO_SAMPLE_RATE, true, AUDIO_BITRATE)
