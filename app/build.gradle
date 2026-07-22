@@ -1,17 +1,16 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 android {
     namespace 'com.gogolive.androidgo'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.gogolive.androidgo"
         // minSdk 26: semua device Android Go (termasuk Xiaomi Redmi A3) minimal Android Oreo Go
         minSdk 26
-        targetSdk 34
+        targetSdk 36
         versionCode 1
         versionName "1.0"
     }
@@ -26,10 +25,6 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = '17'
     }
 
     buildFeatures {

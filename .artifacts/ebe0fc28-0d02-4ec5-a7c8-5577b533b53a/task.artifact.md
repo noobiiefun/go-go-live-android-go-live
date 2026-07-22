@@ -1,0 +1,5 @@
+- [x] Update Gradle Wrapper to 9.5.0
+- [x] Update Android Gradle Plugin to 9.3.0 in root `build.gradle` (removed Kotlin plugin as it's built-in)
+- [x] Update `compileSdk` and `targetSdk` to 36 in `app/build.gradle`
+- [x] Perform Gradle Sync
+- [/] Build and verify the project
