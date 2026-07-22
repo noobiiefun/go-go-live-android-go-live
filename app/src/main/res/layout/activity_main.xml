@@ -42,6 +42,39 @@
     </com.google.android.material.textfield.TextInputLayout>
 
     <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="@string/label_audio_source"
+        android:textStyle="bold" />
+
+    <RadioGroup
+        android:id="@+id/rgAudioSource"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/rbAudioInternal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="@string/audio_source_internal" />
+
+        <RadioButton
+            android:id="@+id/rbAudioMic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/audio_source_mic" />
+
+        <RadioButton
+            android:id="@+id/rbAudioMix"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/audio_source_mix" />
+    </RadioGroup>
+
+    <TextView
         android:id="@+id/tvStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

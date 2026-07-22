@@ -20,7 +20,9 @@ import androidx.core.app.NotificationCompat
 import com.gogolive.androidgo.R
 import com.gogolive.androidgo.ui.MainActivity
 import com.pedro.common.ConnectChecker
+import com.pedro.encoder.input.sources.audio.InternalAudioSource
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.encoder.input.sources.audio.MixAudioSource
 import com.pedro.encoder.input.sources.video.NoVideoSource
 import com.pedro.encoder.input.sources.video.ScreenSource
 import com.pedro.library.generic.GenericStream
@@ -61,6 +63,7 @@ class ScreenRecordService : Service(), ConnectChecker {
     private var savedResultCode: Int = -1
     private var savedResultData: Intent? = null
     private var savedRtmpUrl: String = ""
+    private var savedAudioSource: String = AUDIO_SOURCE_INTERNAL
 
     private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -96,6 +99,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         savedResultCode = resultCode
         savedResultData = data
         savedRtmpUrl = rtmpUrl
+        savedAudioSource = intent.getStringExtra(EXTRA_AUDIO_SOURCE) ?: AUDIO_SOURCE_INTERNAL
         lastOrientation = resources.configuration.orientation
 
         startForegroundWithNotification()
@@ -153,8 +157,46 @@ class ScreenRecordService : Service(), ConnectChecker {
             return
         }
 
+        applyAudioSource(projection)
+
         genericStream.startStream(savedRtmpUrl)
-        Log.d(TAG, "Encoding dimulai pada ${metrics.widthPixels}x${metrics.heightPixels}")
+        Log.d(TAG, "Encoding dimulai pada ${metrics.widthPixels}x${metrics.heightPixels}, audio=$savedAudioSource")
+    }
+
+    /**
+     * Menentukan dari mana audio diambil:
+     * - INTERNAL: audio digital dari sistem HP (misal audio PC yang diputar lewat spacedesk).
+     *   Ini yang disarankan untuk kasus spacedesk supaya tidak ada gema/kualitas jelek akibat
+     *   microphone "mendengar" suara dari speaker HP.
+     * - MIC: microphone fisik HP (suara ruangan/komentar suara kamu).
+     * - MIX: gabungan keduanya.
+     * INTERNAL dan MIX butuh Android 10+ (API 29); di bawah itu otomatis fallback ke microphone.
+     */
+    private fun applyAudioSource(projection: MediaProjection) {
+        val useInternal = savedAudioSource == AUDIO_SOURCE_INTERNAL || savedAudioSource == AUDIO_SOURCE_MIX
+        val supportsInternal = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+
+        if (useInternal && !supportsInternal) {
+            Log.e(TAG, "Audio internal butuh Android 10+, fallback ke microphone")
+        }
+
+        try {
+            when {
+                savedAudioSource == AUDIO_SOURCE_MIX && supportsInternal ->
+                    genericStream.changeAudioSource(MixAudioSource(projection))
+                savedAudioSource == AUDIO_SOURCE_INTERNAL && supportsInternal ->
+                    genericStream.changeAudioSource(InternalAudioSource(projection))
+                else ->
+                    genericStream.changeAudioSource(MicrophoneSource())
+            }
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "Gagal set audio source ($savedAudioSource): ${e.message}, fallback ke microphone")
+            try {
+                genericStream.changeAudioSource(MicrophoneSource())
+            } catch (e2: IllegalArgumentException) {
+                Log.e(TAG, "Fallback microphone juga gagal: ${e2.message}")
+            }
+        }
     }
 
     /**
@@ -295,5 +337,10 @@ class ScreenRecordService : Service(), ConnectChecker {
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
         const val EXTRA_RTMP_URL = "extra_rtmp_url"
+        const val EXTRA_AUDIO_SOURCE = "extra_audio_source"
+
+        const val AUDIO_SOURCE_INTERNAL = "internal"
+        const val AUDIO_SOURCE_MIC = "mic"
+        const val AUDIO_SOURCE_MIX = "mix"
     }
 }

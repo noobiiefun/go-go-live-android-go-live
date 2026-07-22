@@ -12,4 +12,8 @@
     <string name="notif_title">Go Go Live sedang live</string>
     <string name="notif_content">Merekam &amp; menyiarkan seluruh layar</string>
     <string name="toast_isi_dulu">Isi RTMP URL dan Stream Key dulu</string>
+    <string name="label_audio_source">Sumber Audio</string>
+    <string name="audio_source_internal">Audio Internal HP (disarankan untuk audio PC lewat spacedesk)</string>
+    <string name="audio_source_mic">Microphone HP (suara sekitar/ruangan)</string>
+    <string name="audio_source_mix">Campur: Audio Internal + Microphone HP</string>
 </resources>

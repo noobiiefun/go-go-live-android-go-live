@@ -144,7 +144,48 @@ di layar.
 
 
 
-## Update: pindah ke RootEncoder versi 2.7.3
+## Update: pilihan sumber audio (penting untuk kasus spacedesk!)
+
+Kalau kamu live streaming layar PC lewat spacedesk, **jangan pakai microphone HP**
+untuk audio - itu akan menangkap suara lewat speaker HP (kalau spacedesk
+memutar audio PC di HP), hasilnya gema/kualitas jelek. Sekarang aplikasi
+punya 3 pilihan sumber audio (radio button di bawah kolom Stream Key):
+
+- **Audio Internal HP (disarankan)** - capture audio HP secara digital dari
+  sistem, tanpa lewat microphone fisik. Kalau spacedesk memutar audio PC
+  di HP, ini yang menangkapnya dengan bersih. Butuh Android 10+ (semua HP
+  modern termasuk Redmi A3 sudah pasti support).
+- **Microphone HP** - suara ruangan/komentar suara kamu sendiri.
+- **Campur: Audio Internal + Microphone** - gabungan keduanya (misal mau
+  ada suara PC + komentar suara kamu bersamaan).
+
+Pilihan ini juga otomatis diingat (tersimpan) seperti RTMP URL & Stream Key.
+
+**Catatan:** beberapa aplikasi Android menandai audionya "tidak boleh
+direkam" (proteksi konten, biasanya aplikasi video/musik berlisensi) -
+kalau audio PC yang lewat spacedesk tidak tertangkap sama sekali, ini
+kemungkinan penyebabnya di sisi aplikasi PC/spacedesk-nya, bukan bug di
+aplikasi ini.
+
+
+
+**Fix crash "SecurityException: Starting FGS with type microphone":**
+`RECORD_AUDIO` adalah *dangerous permission* — dideklarasikan di
+`AndroidManifest.xml` saja TIDAK CUKUP, harus di-approve user lewat dialog
+runtime. Versi awal `MainActivity.kt` lupa meminta izin ini (cuma minta izin
+notifikasi), jadi begitu `ScreenRecordService` mencoba `startForeground()`
+dengan tipe `microphone`, Android menolak dan force close. Sekarang
+`MainActivity` akan menampilkan dialog izin microphone (kalau belum pernah
+diizinkan) SEBELUM menampilkan dialog izin capture layar.
+
+**Fitur simpan RTMP URL & Stream Key otomatis:**
+Kolom RTMP URL dan Stream Key sekarang disimpan ke `SharedPreferences` setiap
+kali kamu menekan "Mulai Live", dan otomatis terisi lagi setiap kali membuka
+aplikasi. Tidak perlu ketik ulang tiap mau live. Data ini tersimpan lokal di
+HP saja (tidak dikirim ke mana-mana), aman dihapus dengan uninstall aplikasi
+atau "Clear data" di Pengaturan.
+
+
 
 Versi awal project ini pakai library RootEncoder versi lama (2.2.6, class
 `RtmpDisplay`). Versi itu sering gagal di-resolve Jitpack di Android Studio
