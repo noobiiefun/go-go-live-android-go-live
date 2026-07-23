@@ -1,28 +1,32 @@
-# Implementation Plan - Fix AAR Metadata Error (SDK 36 Requirement)
+# Implementation Plan - Fix Build Bugs (Kotlin Incompatibility)
 
-The project fails to build because the `RootEncoder` library (v2.7.3) requires `compileSdk 36`, while the project is currently configured with `compileSdk 34` and Android Gradle Plugin (AGP) 8.3.2. Based on the build error, both AGP and `compileSdk` must be updated to support version 36.
+The project is currently failing to build because of a Kotlin version mismatch. The `RootEncoder` library (v2.7.3) was compiled with Kotlin metadata version 2.3.0, but the project is using Kotlin 1.9.23, which cannot read metadata higher than 2.0.0. Additionally, there are several "Unresolved reference" errors for standard Kotlin functions, likely resulting from the same classpath/compatibility issue.
 
 ## Proposed Changes
 
 ### Build Configuration
 
 #### [MODIFY] [root build.gradle](file:///F:/coding/go-go-live-android-go-live/build.gradle)
-- Update Android Gradle Plugin (AGP) version from `8.3.2` to `9.3.0`.
-- Update Kotlin plugin version from `1.9.23` to `2.4.10` to ensure compatibility with AGP 9.3.0 and SDK 36.
+- Update Kotlin plugin version from `1.9.23` to `2.4.10`.
+- Keep AGP version at `8.13.2` as requested by the user, as it supports `compileSdk 36`.
 
 #### [MODIFY] [app build.gradle](file:///F:/coding/go-go-live-android-go-live/app/build.gradle)
-- Update `compileSdk` to `36`.
-- Update `targetSdk` to `36` to align with the library's requirements and modern platform standards.
+- Ensure compatibility with Kotlin 2.x.
+- Keep `compileSdk` and `targetSdk` at `36`.
 
-#### [MODIFY] [gradle-wrapper.properties](file:///F:/coding/go-go-live-android-go-live/gradle/wrapper/gradle-wrapper.properties)
-- Update Gradle version from `8.6` to `9.2` (required for AGP 9.3.0).
+### Source Code Fixes
+
+#### [MODIFY] [ScreenRecordService.kt](file:///F:/coding/go-go-live-android-go-live/app/src/main/java/com/gogolive/androidgo/service/ScreenRecordService.kt)
+- If "Unresolved reference" errors persist after the Kotlin upgrade, I will check and fix missing imports (though they appear present, the compiler is just failing to link them).
+
+#### [MODIFY] [MainActivity.kt](file:///F:/coding/go-go-live-android-go-live/app/src/main/java/com/gogolive/androidgo/ui/MainActivity.kt)
+- Similar to above, verify if unresolved references like `isNullOrBlank` and `trim` are resolved by the plugin upgrade.
 
 ## Verification Plan
 
 ### Automated Tests
-- Run `./gradlew :app:checkDebugAarMetadata` to verify that the AAR metadata check passes.
-- Run `./gradlew assembleDebug` to ensure the project builds successfully with the new SDK and plugin versions.
+- Run `./gradlew assembleDebug` to verify the build process completes without Kotlin metadata or unresolved reference errors.
 
 ### Manual Verification
-- Perform a Gradle Sync in Android Studio.
-- Verify the project structure and SDK settings in the Project Structure dialog.
+- Perform a Gradle Sync in Android Studio to ensure all standard libraries are correctly indexed.
+- Verify that the code editor no longer shows red highlights for standard Kotlin functions like `lazy`, `orEmpty`, `trim`, etc.

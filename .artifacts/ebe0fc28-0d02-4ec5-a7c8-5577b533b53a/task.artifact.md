@@ -1,5 +1,4 @@
-- [x] Update Gradle Wrapper to 9.5.0
-- [x] Update Android Gradle Plugin to 9.3.0 in root `build.gradle` (removed Kotlin plugin as it's built-in)
-- [x] Update `compileSdk` and `targetSdk` to 36 in `app/build.gradle`
-- [x] Perform Gradle Sync
-- [/] Build and verify the project
+- [x] Update Kotlin version to 2.4.10 in root `build.gradle`
+- [x] Update AGP to 8.13.2 in root `build.gradle`
+- [x] Sync Gradle and check for unresolved references
+- [x] Build `assembleDebug` to verify the fix
