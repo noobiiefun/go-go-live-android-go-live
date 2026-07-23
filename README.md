@@ -144,7 +144,25 @@ di layar.
 
 
 
-## Update: pilihan sumber audio (penting untuk kasus spacedesk!)
+## Update: naikkan compileSdk & Android Gradle Plugin
+
+RootEncoder 2.7.3 mensyaratkan compile terhadap **API 36** ke atas. Kalau
+muncul error "AAR metadata... requires libraries and applications that
+depend on it to compile against version 36", berarti `compileSdk` project
+kamu masih di bawah itu. Sudah diperbaiki di project ini:
+- `compileSdk` & `targetSdk`: 34 → **36**
+- Android Gradle Plugin (di root `build.gradle`): 8.3.2 → **8.13.2**
+  (versi lama cuma support compileSdk sampai 34)
+- Gradle wrapper: 8.6 → **8.13** (dibutuhkan oleh AGP 8.13.2)
+
+**Penting:** kalau kamu menimpa project dengan file dari saya secara manual
+satu-satu, pastikan **root `build.gradle`** dan
+**`gradle/wrapper/gradle-wrapper.properties`** juga ikut ditimpa, bukan cuma
+file di `app/`. Paling aman: extract ulang seluruh zip project ke folder
+baru/kosong setiap kali saya kirim update, supaya tidak ada file versi lama
+yang tercampur.
+
+
 
 Kalau kamu live streaming layar PC lewat spacedesk, **jangan pakai microphone HP**
 untuk audio - itu akan menangkap suara lewat speaker HP (kalau spacedesk

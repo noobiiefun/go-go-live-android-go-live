@@ -5,13 +5,15 @@ plugins {
 
 android {
     namespace 'com.gogolive.androidgo'
-    compileSdk 34
+    // compileSdk 36 WAJIB - RootEncoder 2.7.3 mensyaratkan compile terhadap API 36+.
+    // Kalau di masa depan mau upgrade versi RootEncoder lagi, cek juga syarat compileSdk-nya.
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.gogolive.androidgo"
         // minSdk 26: semua device Android Go (termasuk Xiaomi Redmi A3) minimal Android Oreo Go
         minSdk 26
-        targetSdk 34
+        targetSdk 36
         versionCode 1
         versionName "1.0"
     }
