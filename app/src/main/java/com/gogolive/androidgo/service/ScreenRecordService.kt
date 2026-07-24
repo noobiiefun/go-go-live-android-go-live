@@ -108,32 +108,45 @@ class ScreenRecordService : Service(), ConnectChecker {
 
     /** Menyiapkan encoder + ScreenSource baru dan mulai streaming, memakai ukuran layar TERKINI. */
     private fun startEncoding(isRestart: Boolean) {
-        val data = savedResultData ?: return
-
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
+        // PENTING: token izin MediaProjection (savedResultCode/savedResultData) HANYA BOLEH
+        // dipakai SEKALI untuk memanggil getMediaProjection(). Kalau dipanggil lagi saat restart
+        // (misal karena rotasi ke landscape waktu buka spacedesk), Android akan menolak/crash.
+        // Jadi saat restart, kita HARUS pakai ulang objek MediaProjection yang sudah didapat di
+        // awal (field "mediaProjection"), bukan minta yang baru.
+        val projection: MediaProjection
         if (isRestart) {
-            mediaProjection?.stop()
-        }
-        val projection = mediaProjectionManager.getMediaProjection(savedResultCode, data)
-        if (projection == null) {
-            Log.e(TAG, "Gagal mendapatkan MediaProjection")
-            stopSelf()
-            return
-        }
-        mediaProjection = projection
-
-        // WAJIB sejak Android 14: MediaProjection harus didaftarkan callback-nya SEBELUM
-        // dipakai untuk capture (createVirtualDisplay). Kalau tidak didaftarkan, sistem akan
-        // langsung throw IllegalStateException begitu capture dimulai - inilah penyebab
-        // force close yang terjadi persis setelah user memilih "seluruh layar" di dialog izin.
-        projection.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                Log.d(TAG, "MediaProjection dihentikan oleh sistem (misal user cabut izin lewat status bar)")
+            val existing = mediaProjection
+            if (existing == null) {
+                Log.e(TAG, "Restart dibatalkan: tidak ada MediaProjection aktif")
+                stopSelf()
+                return
             }
-        }, mainHandler)
+            projection = existing
+        } else {
+            val data = savedResultData ?: return
+            val fresh = mediaProjectionManager.getMediaProjection(savedResultCode, data)
+            if (fresh == null) {
+                Log.e(TAG, "Gagal mendapatkan MediaProjection")
+                stopSelf()
+                return
+            }
+            mediaProjection = fresh
+
+            // WAJIB sejak Android 14: MediaProjection harus didaftarkan callback-nya SEBELUM
+            // dipakai untuk capture (createVirtualDisplay). Kalau tidak didaftarkan, sistem akan
+            // langsung throw IllegalStateException begitu capture dimulai.
+            fresh.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.d(TAG, "MediaProjection dihentikan oleh sistem (misal user cabut izin lewat status bar)")
+                }
+            }, mainHandler)
+
+            projection = fresh
+        }
 
         val prepared = try {
             genericStream.prepareVideo(metrics.widthPixels, metrics.heightPixels, VIDEO_BITRATE, FPS) &&
