@@ -235,10 +235,21 @@ class ScreenRecordService : Service(), ConnectChecker {
     }
 
     private fun restartEncodingForNewOrientation() {
-        if (genericStream.isStreaming) {
-            genericStream.stopStream()
+        try {
+            if (genericStream.isStreaming) {
+                genericStream.stopStream()
+            }
+            startEncoding(isRestart = true)
+        } catch (e: Throwable) {
+            // Tangkap SEMUA jenis exception (bukan cuma IllegalArgumentException) di sini.
+            // Ini titik paling rawan crash: dipicu tiap kali resolusi/orientasi layar
+            // berubah saat live jalan (misal buka app lain yang mengubah tampilan,
+            // termasuk kasus spacedesk). Kalau restart gagal, hentikan service dengan
+            // rapi (log jelas) daripada membiarkan uncaught exception menjatuhkan
+            // seluruh proses aplikasi (force close).
+            Log.e(TAG, "Restart encoder gagal saat perubahan layar, menghentikan live: ${e.message}", e)
+            handleStop()
         }
-        startEncoding(isRestart = true)
     }
 
     private fun handleStop() {
@@ -324,6 +335,16 @@ class ScreenRecordService : Service(), ConnectChecker {
 
     override fun onAuthSuccess() {
         Log.d(TAG, "RTMP auth sukses")
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Log level tekanan memori dari sistem. Kalau force close terjadi TANPA log
+        // exception apapun tapi ada log onTrimMemory dengan level tinggi (misal
+        // TRIM_MEMORY_RUNNING_CRITICAL/COMPLETE) tepat sebelumnya, itu tanda kuat
+        // penyebabnya RAM kurang (device Android Go + aplikasi berat seperti
+        // spacedesk berjalan bersamaan), bukan bug logika di aplikasi ini.
+        Log.w(TAG, "onTrimMemory dipanggil sistem, level=$level")
     }
 
     override fun onDestroy() {
