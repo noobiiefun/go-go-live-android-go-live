@@ -66,6 +66,15 @@ class ScreenRecordService : Service(), ConnectChecker {
     private var savedAudioSource: String = AUDIO_SOURCE_INTERNAL
 
     private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
+    // Dicek terpisah dari orientasi. Alasan: skenario spacedesk lewat kabel data biasanya
+    // TIDAK mengubah enum orientasi (tetap portrait/landscape yang sama), tapi RESOLUSI ASLI
+    // capture bisa berubah (density/ukuran tampilan menyesuaikan sinyal dari PC). Kalau cuma
+    // mengandalkan cek orientasi, perubahan ini tidak akan memicu restart sama sekali - kanvas
+    // MediaProjection lama (ukuran tetap dari awal) jadi tidak cocok lagi dengan kondisi layar,
+    // hasilnya video freeze/rusak padahal koneksi RTMP masih terbuka (live "kelihatan" jalan
+    // tapi videonya sudah tidak ter-update).
+    private var lastCaptureWidth: Int = 0
+    private var lastCaptureHeight: Int = 0
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingRestart: Runnable? = null
 
@@ -101,9 +110,32 @@ class ScreenRecordService : Service(), ConnectChecker {
         savedRtmpUrl = rtmpUrl
         savedAudioSource = intent.getStringExtra(EXTRA_AUDIO_SOURCE) ?: AUDIO_SOURCE_INTERNAL
         lastOrientation = resources.configuration.orientation
+        // lastCaptureWidth/Height diisi di dalam startEncoding() setelah metrics dibaca,
+        // supaya nilainya konsisten sama persis dengan yang dipakai encoder.
 
         startForegroundWithNotification()
         startEncoding(isRestart = false)
+        startPeriodicResolutionWatcher()
+    }
+
+    /**
+     * Jaring pengaman tambahan di luar onConfigurationChanged(). Beberapa vendor Android
+     * (termasuk MIUI/Android Go) tidak selalu memicu callback config-change untuk perubahan
+     * resolusi yang datang dari display eksternal seperti spacedesk. Jadi selain reaktif
+     * lewat callback, kita juga cek manual setiap beberapa detik selama live berjalan.
+     * Biaya cek ini murah (cuma baca metrics), jauh lebih murah daripada video diam-diam
+     * freeze tanpa ketahuan.
+     */
+    private fun startPeriodicResolutionWatcher() {
+        mainHandler.postDelayed(object : Runnable {
+            override fun run() {
+                if (!this@ScreenRecordService::genericStream.isInitialized || savedResultData == null) {
+                    return // live sudah berhenti, hentikan watcher
+                }
+                checkResolutionAndRestartIfNeeded()
+                mainHandler.postDelayed(this, RESOLUTION_WATCH_INTERVAL_MS)
+            }
+        }, RESOLUTION_WATCH_INTERVAL_MS)
     }
 
     /** Menyiapkan encoder + ScreenSource baru dan mulai streaming, memakai ukuran layar TERKINI. */
@@ -111,6 +143,8 @@ class ScreenRecordService : Service(), ConnectChecker {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
+        lastCaptureWidth = metrics.widthPixels
+        lastCaptureHeight = metrics.heightPixels
 
         // PENTING: token izin MediaProjection (savedResultCode/savedResultData) HANYA BOLEH
         // dipakai SEKALI untuk memanggil getMediaProjection(). Kalau dipanggil lagi saat restart
@@ -221,17 +255,42 @@ class ScreenRecordService : Service(), ConnectChecker {
 
         if (!this::genericStream.isInitialized) return
         if (savedResultData == null) return // belum mulai streaming, abaikan
-        if (newConfig.orientation == lastOrientation) return // bukan perubahan orientasi
 
         lastOrientation = newConfig.orientation
-        Log.d(TAG, "Orientasi berubah, menyesuaikan ulang resolusi stream...")
+        Log.d(TAG, "onConfigurationChanged terpicu, cek ulang resolusi layar...")
 
-        // Debounce: rotasi bisa memicu beberapa callback beruntun selama animasi,
-        // jadi tunggu sebentar sampai rotasi selesai sebelum restart encoder.
+        // Debounce: rotasi/perubahan tampilan bisa memicu beberapa callback beruntun,
+        // jadi tunggu sebentar sampai kondisi layar stabil sebelum cek & restart encoder.
         pendingRestart?.let { mainHandler.removeCallbacks(it) }
-        val restartTask = Runnable { restartEncodingForNewOrientation() }
+        val restartTask = Runnable { checkResolutionAndRestartIfNeeded() }
         pendingRestart = restartTask
         mainHandler.postDelayed(restartTask, ORIENTATION_DEBOUNCE_MS)
+    }
+
+    /**
+     * Dipanggil setelah debounce. Restart HANYA dilakukan kalau resolusi asli layar
+     * benar-benar berbeda dari yang dipakai encoder saat ini - bukan cuma karena
+     * onConfigurationChanged terpicu (callback ini bisa terpicu oleh hal lain yang
+     * tidak mengubah ukuran capture sama sekali, misal density/keyboard).
+     * Ini juga menutup celah kasus spacedesk: resolusi bisa berubah tanpa enum
+     * orientasi (potrait/landscape) ikut berubah.
+     */
+    private fun checkResolutionAndRestartIfNeeded() {
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+
+        if (metrics.widthPixels == lastCaptureWidth && metrics.heightPixels == lastCaptureHeight) {
+            Log.d(TAG, "Resolusi tidak berubah (${metrics.widthPixels}x${metrics.heightPixels}), restart dilewati")
+            return
+        }
+
+        Log.d(
+            TAG,
+            "Resolusi berubah dari ${lastCaptureWidth}x${lastCaptureHeight} ke " +
+                "${metrics.widthPixels}x${metrics.heightPixels}, restart encoder..."
+        )
+        restartEncodingForNewOrientation()
     }
 
     private fun restartEncodingForNewOrientation() {
@@ -259,6 +318,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         }
         mediaProjection?.stop()
         mediaProjection = null
+        savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -365,6 +425,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         private const val AUDIO_SAMPLE_RATE = 44100
         private const val AUDIO_BITRATE = 128 * 1000
         private const val ORIENTATION_DEBOUNCE_MS = 500L
+        private const val RESOLUTION_WATCH_INTERVAL_MS = 5_000L
 
         const val ACTION_START = "com.gogolive.androidgo.action.START"
         const val ACTION_STOP = "com.gogolive.androidgo.action.STOP"
