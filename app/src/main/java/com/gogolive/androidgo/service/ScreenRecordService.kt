@@ -110,6 +110,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         savedRtmpUrl = rtmpUrl
         savedAudioSource = intent.getStringExtra(EXTRA_AUDIO_SOURCE) ?: AUDIO_SOURCE_INTERNAL
         lastOrientation = resources.configuration.orientation
+        isRunning = true
         // lastCaptureWidth/Height diisi di dalam startEncoding() setelah metrics dibaca,
         // supaya nilainya konsisten sama persis dengan yang dipakai encoder.
 
@@ -319,6 +320,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         mediaProjection?.stop()
         mediaProjection = null
         savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
+        isRunning = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -415,6 +417,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         }
         mediaProjection?.stop()
         mediaProjection = null
+        isRunning = false // jaga-jaga kalau service dimatikan sistem (bukan lewat handleStop())
     }
 
     companion object {
@@ -437,5 +440,14 @@ class ScreenRecordService : Service(), ConnectChecker {
         const val AUDIO_SOURCE_INTERNAL = "internal"
         const val AUDIO_SOURCE_MIC = "mic"
         const val AUDIO_SOURCE_MIX = "mix"
+
+        // Dibaca oleh LiveQuickTileService untuk tahu harus menampilkan tile
+        // dalam kondisi "aktif" (klik = stop) atau "tidak aktif" (klik = mulai).
+        // Cukup var biasa (bukan lewat broadcast) karena TileService selalu
+        // membaca ulang nilainya tiap kali panel Quick Settings dibuka
+        // (onStartListening), jadi tidak butuh notifikasi real-time.
+        @Volatile
+        var isRunning: Boolean = false
+            private set
     }
 }

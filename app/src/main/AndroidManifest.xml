@@ -31,6 +31,21 @@
         </activity>
 
         <!--
+          Activity tak terlihat, dipicu dari LiveQuickTileService (Quick Settings Tile).
+          Tujuannya supaya mulai live tidak perlu membuka MainActivity yang layar penuh -
+          penting untuk kasus spacedesk supaya orientasi landscape yang sedang aktif
+          tidak keganggu/reset ke potrait.
+        -->
+        <activity
+            android:name=".ui.QuickStartActivity"
+            android:exported="false"
+            android:theme="@style/Theme.GoGoLive.Invisible"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:launchMode="singleInstance"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <!--
           Service ini yang benar-benar melakukan capture layar + streaming.
           Berjalan sebagai FOREGROUND SERVICE BIASA (bukan bubble/overlay),
           jadi tidak menggambar apapun di atas aplikasi lain - hanya notifikasi
@@ -41,6 +56,22 @@
             android:name=".service.ScreenRecordService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|microphone" />
+
+        <!--
+          Quick Settings Tile - muncul di notification shade setelah user
+          menambahkannya lewat menu edit tile. Memungkinkan mulai/stop live
+          tanpa membuka aplikasi ini secara penuh.
+        -->
+        <service
+            android:name=".service.LiveQuickTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_live"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
     </application>
 </manifest>

@@ -26,4 +26,20 @@
         <!-- Tema yang dipakai SETELAH splash selesai -->
         <item name="postSplashScreenTheme">@style/Theme.GoGoLive</item>
     </style>
+
+    <!--
+      Tema tak terlihat untuk QuickStartActivity. Tidak ada window background/animation,
+      supaya activity ini benar-benar tidak menggambar apapun di layar selain dialog
+      sistem (izin microphone/capture layar) - dipakai supaya tile Quick Settings bisa
+      memicu izin tanpa mengambil alih tampilan layar (penting untuk kasus spacedesk).
+    -->
+    <style name="Theme.GoGoLive.Invisible" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>
