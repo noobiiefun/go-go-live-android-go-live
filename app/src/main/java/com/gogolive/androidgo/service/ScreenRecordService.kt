@@ -1,5 +1,6 @@
 package com.gogolive.androidgo.service
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -75,6 +76,10 @@ class ScreenRecordService : Service(), ConnectChecker {
     // tapi videonya sudah tidak ter-update).
     private var lastCaptureWidth: Int = 0
     private var lastCaptureHeight: Int = 0
+    // FPS yang benar-benar dipakai untuk sesi live saat ini, hasil pickFpsForDevice()
+    // di awal startEncoding(isRestart = false). Dikunci selama sesi, tidak berubah
+    // real-time (lihat catatan di pickFpsForDevice()).
+    private var selectedFps: Int = FPS_FLOOR
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingRestart: Runnable? = null
 
@@ -139,6 +144,33 @@ class ScreenRecordService : Service(), ConnectChecker {
         }, RESOLUTION_WATCH_INTERVAL_MS)
     }
 
+    /**
+     * Menentukan FPS SEKALI di awal sesi live, sebelum encoder disiapkan - BUKAN
+     * berjalan real-time selama live (lihat penjelasan di startEncoding()).
+     *
+     * Kenapa tidak real-time: mengubah FPS di tengah live butuh menyiapkan ulang
+     * pipeline encoder video, dan operasi semacam itu (mirip restart resolusi) sudah
+     * terbukti rapuh di Android versi baru gara-gara MediaProjection tidak boleh
+     * dipakai berulang untuk sesi capture baru. Jadi supaya tidak mengulang masalah
+     * yang sama, FPS dikunci di awal dan tidak diutak-atik lagi selama live berjalan.
+     *
+     * Caranya menebak "kuat/tidaknya" device: pakai sinyal resmi Android
+     * (ActivityManager.isLowRamDevice(), dipakai sistem sendiri untuk menandai
+     * perangkat kelas Android Go/RAM rendah). Ini bukan benchmark performa nyata
+     * (tidak menjamin 60fps beneran mulus di semua kondisi), cuma perkiraan awal.
+     */
+    private fun pickFpsForDevice(): Int {
+        val activityManager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        val isLowRamDevice = activityManager.isLowRamDevice
+        val chosen = if (isLowRamDevice) FPS_FLOOR else FPS_CEILING
+        Log.d(
+            TAG,
+            "pickFpsForDevice: isLowRamDevice=$isLowRamDevice -> FPS dipilih $chosen " +
+                "(floor=$FPS_FLOOR, ceiling=$FPS_CEILING)"
+        )
+        return chosen
+    }
+
     /** Menyiapkan encoder + ScreenSource baru dan mulai streaming, memakai ukuran layar TERKINI. */
     private fun startEncoding(isRestart: Boolean) {
         val metrics = DisplayMetrics()
@@ -146,6 +178,15 @@ class ScreenRecordService : Service(), ConnectChecker {
         windowManager.defaultDisplay.getRealMetrics(metrics)
         lastCaptureWidth = metrics.widthPixels
         lastCaptureHeight = metrics.heightPixels
+
+        // FPS ditentukan HANYA SEKALI di awal sesi live (bukan real-time selama live
+        // jalan). Alasan: mengubah FPS di tengah sesi butuh menyiapkan ulang encoder
+        // video, dan itu jalur yang sama dengan restart resolusi yang ternyata rapuh
+        // (MediaProjection tidak boleh dipakai berulang). Jadi supaya aman, FPS dikunci
+        // di awal sama seperti resolusi, memakai hasil cek performaDevice() di bawah.
+        if (!isRestart) {
+            selectedFps = pickFpsForDevice()
+        }
 
         // PENTING: token izin MediaProjection (savedResultCode/savedResultData) HANYA BOLEH
         // dipakai SEKALI untuk memanggil getMediaProjection(). Kalau dipanggil lagi saat restart
@@ -184,7 +225,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         }
 
         val prepared = try {
-            genericStream.prepareVideo(metrics.widthPixels, metrics.heightPixels, VIDEO_BITRATE, FPS) &&
+            genericStream.prepareVideo(metrics.widthPixels, metrics.heightPixels, VIDEO_BITRATE, selectedFps) &&
                 genericStream.prepareAudio(AUDIO_SAMPLE_RATE, true, AUDIO_BITRATE)
         } catch (e: IllegalArgumentException) {
             Log.e(TAG, "Gagal prepare video/audio: ${e.message}")
@@ -424,7 +465,13 @@ class ScreenRecordService : Service(), ConnectChecker {
         private const val TAG = "ScreenRecordService"
         private const val NOTIFICATION_ID = 1001
         private const val VIDEO_BITRATE = 3_000 * 1000 // 3 Mbps, cukup untuk 30fps di Android Go
-        private const val FPS = 30
+        // FPS_FLOOR/CEILING: batas bawah & atas untuk pemilihan otomatis di pickFpsForDevice().
+        // 30 sebagai batas minimum sesuai permintaan; 60 kalau device terdeteksi cukup kuat
+        // (bukan low-RAM device). Lihat catatan di pickFpsForDevice() kenapa ini dikunci di
+        // awal sesi saja, bukan berubah real-time.
+        // https://github.com/pedroSG94/RootEncoder/issues/232 (referensi soal FPS & sync)
+        private const val FPS_FLOOR = 30
+        private const val FPS_CEILING = 60
         private const val AUDIO_SAMPLE_RATE = 44100
         private const val AUDIO_BITRATE = 128 * 1000
         private const val ORIENTATION_DEBOUNCE_MS = 500L
