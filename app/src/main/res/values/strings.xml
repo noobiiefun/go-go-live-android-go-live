@@ -5,6 +5,8 @@
     <string name="label_stream_key">Stream Key YouTube</string>
     <string name="btn_start">Mulai Live</string>
     <string name="btn_stop">Stop Live</string>
+    <string name="btn_save">Simpan RTMP URL &amp; Stream Key</string>
+    <string name="toast_saved">Tersimpan</string>
     <string name="status_idle">Status: belum live</string>
     <string name="status_live">Status: LIVE 🔴</string>
     <string name="status_connecting">Status: menghubungkan…</string>

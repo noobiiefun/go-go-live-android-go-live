@@ -107,6 +107,21 @@
             android:text="@string/btn_stop" />
     </LinearLayout>
 
+    <!--
+      Tombol terpisah dari Start - supaya RTMP URL/Stream Key baru bisa disimpan
+      TANPA harus langsung mulai live. Penting untuk alur spacedesk: kalau update
+      key hanya bisa lewat tombol Start, key baru tidak pernah tersimpan kalau
+      user selanjutnya mulai live lewat Quick Settings Tile (bukan lewat Start di
+      UI ini) - tile akan baca key LAMA dari SharedPreferences.
+    -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSave"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/btn_save" />
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

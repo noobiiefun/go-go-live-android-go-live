@@ -87,6 +87,39 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnStart.setOnClickListener { onStartClicked() }
         binding.btnStop.setOnClickListener { onStopClicked() }
+        binding.btnSave.setOnClickListener { onSaveClicked() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // PENTING: sinkronkan tombol Start/Stop dengan status SEBENARNYA dari
+        // ScreenRecordService (bukan cuma state lokal Activity ini). Kalau live
+        // dimulai lewat Quick Settings Tile (bukan lewat tombol Start di UI ini),
+        // Activity ini baru dibuka TIDAK PERNAH menjalankan onStartClicked(), jadi
+        // btnStop akan tetap disabled (default XML) meski live sebenarnya sedang
+        // jalan - user jadi tidak bisa menekan Stop sama sekali dari UI.
+        if (ScreenRecordService.isRunning) {
+            binding.tvStatus.text = getString(R.string.status_live)
+            binding.btnStart.isEnabled = false
+            binding.btnStop.isEnabled = true
+        } else {
+            resetStatusToIdle()
+        }
+    }
+
+    /** Simpan RTMP URL & Stream Key TANPA langsung mulai live - lihat catatan di layout btnSave. */
+    private fun onSaveClicked() {
+        val rtmpUrl = binding.etRtmpUrl.text?.toString()?.trim().orEmpty()
+        val streamKey = binding.etStreamKey.text?.toString()?.trim().orEmpty()
+
+        if (rtmpUrl.isEmpty() || streamKey.isEmpty()) {
+            Toast.makeText(this, getString(R.string.toast_isi_dulu), Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        saveRtmpFields(rtmpUrl, streamKey)
+        prefs.edit().putString(KEY_AUDIO_SOURCE, selectedAudioSourceValue()).apply()
+        Toast.makeText(this, getString(R.string.toast_saved), Toast.LENGTH_SHORT).show()
     }
 
     /** Isi ulang kolom RTMP URL & Stream Key dari yang terakhir kali disimpan, kalau ada. */

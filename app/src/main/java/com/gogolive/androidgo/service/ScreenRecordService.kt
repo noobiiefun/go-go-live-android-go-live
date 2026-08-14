@@ -354,16 +354,32 @@ class ScreenRecordService : Service(), ConnectChecker {
     }
 
     private fun handleStop() {
-        pendingRestart?.let { mainHandler.removeCallbacks(it) }
-        if (this::genericStream.isInitialized && genericStream.isStreaming) {
-            genericStream.stopStream()
+        // PENTING: dibungkus try/finally. Kalau genericStream.stopStream() melempar
+        // exception (bisa terjadi - sudah pernah kejadian di kasus lain), baris
+        // pembersihan (stopForeground/stopSelf/reset state) TETAP HARUS jalan lewat
+        // finally. Sebelumnya tanpa ini: kalau stopStream() gagal, service tidak
+        // pernah benar-benar berhenti (notifikasi/live nempel terus, harus force stop
+        // manual dari Pengaturan), dan state lama yang tidak kebersihan ikut merusak
+        // sesi live berikutnya (video tidak sampai ke YouTube).
+        try {
+            pendingRestart?.let { mainHandler.removeCallbacks(it) }
+            if (this::genericStream.isInitialized && genericStream.isStreaming) {
+                genericStream.stopStream()
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error saat stopStream(), lanjut bersihkan paksa: ${e.message}", e)
+        } finally {
+            try {
+                mediaProjection?.stop()
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error saat mediaProjection.stop(): ${e.message}", e)
+            }
+            mediaProjection = null
+            savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
+            isRunning = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
-        mediaProjection?.stop()
-        mediaProjection = null
-        savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
-        isRunning = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     private val windowManager
