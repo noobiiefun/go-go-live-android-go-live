@@ -64,6 +64,7 @@ class ScreenRecordService : Service(), ConnectChecker {
     private var savedResultData: Intent? = null
     private var savedRtmpUrl: String = ""
     private var savedAudioSource: String = AUDIO_SOURCE_INTERNAL
+    private var savedFps: Int = FPS_FLOOR
 
     private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
     // Dicek terpisah dari orientasi. Alasan: skenario spacedesk lewat kabel data biasanya
@@ -75,9 +76,10 @@ class ScreenRecordService : Service(), ConnectChecker {
     // tapi videonya sudah tidak ter-update).
     private var lastCaptureWidth: Int = 0
     private var lastCaptureHeight: Int = 0
-    // FPS yang benar-benar dipakai untuk sesi live saat ini, hasil pickFpsForDevice()
-    // di awal startEncoding(isRestart = false). Dikunci selama sesi, tidak berubah
-    // real-time (lihat catatan di pickFpsForDevice()).
+    // FPS ini TIDAK dipilih otomatis oleh service - nilainya datang dari savedFps
+    // (extra EXTRA_FPS), yaitu pilihan manual user di UI. Dikunci selama sesi live,
+    // tidak berubah real-time (mengubah fps di tengah live butuh setup ulang encoder,
+    // jalur yang sama rapuhnya dengan restart resolusi).
     private var selectedFps: Int = FPS_FLOOR
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingRestart: Runnable? = null
@@ -113,6 +115,10 @@ class ScreenRecordService : Service(), ConnectChecker {
         savedResultData = data
         savedRtmpUrl = rtmpUrl
         savedAudioSource = intent.getStringExtra(EXTRA_AUDIO_SOURCE) ?: AUDIO_SOURCE_INTERNAL
+        // Dipilih MANUAL oleh user di UI (bukan ditebak otomatis lagi - lihat riwayat
+        // di pickFpsForDevice() kenapa deteksi otomatis dibatalkan). Default 30 kalau
+        // extra ini entah kenapa tidak dikirim (misal dari versi lama yang belum update).
+        savedFps = intent.getIntExtra(EXTRA_FPS, FPS_FLOOR).coerceIn(FPS_FLOOR, FPS_CEILING)
         lastOrientation = resources.configuration.orientation
         isRunning = true
         // lastCaptureWidth/Height diisi di dalam startEncoding() setelah metrics dibaca,
@@ -143,30 +149,6 @@ class ScreenRecordService : Service(), ConnectChecker {
         }, RESOLUTION_WATCH_INTERVAL_MS)
     }
 
-    /**
-     * Menentukan FPS SEKALI di awal sesi live, sebelum encoder disiapkan - BUKAN
-     * berjalan real-time selama live (lihat penjelasan di startEncoding()).
-     *
-     * Kenapa tidak real-time: mengubah FPS di tengah live butuh menyiapkan ulang
-     * pipeline encoder video, dan operasi semacam itu (mirip restart resolusi) sudah
-     * terbukti rapuh di Android versi baru gara-gara MediaProjection tidak boleh
-     * dipakai berulang untuk sesi capture baru. Jadi supaya tidak mengulang masalah
-     * yang sama, FPS dikunci di awal dan tidak diutak-atik lagi selama live berjalan.
-     *
-     * RIWAYAT: sempat dicoba menebak lewat ActivityManager.isLowRamDevice() (device
-     * RAM cukup -> 60fps). TERBUKTI TIDAK CUKUP - device bisa saja RAM-nya besar tapi
-     * chip hardware video encoder-nya sendiri tidak sanggup 60fps, dan saat itu terjadi
-     * BUKAN cuma video patah-patah tapi encoder-nya CRASH TOTAL (Codec2 process mati,
-     * DEAD_OBJECT), yang bikin seluruh live macet + aplikasi hang (termasuk tombol Stop
-     * tidak merespon). Jadi sekarang floor aman (30fps) dipakai selalu, sampai ada cara
-     * yang lebih terbukti untuk mendeteksi kesanggupan encoder video secara aman.
-     */
-    private fun pickFpsForDevice(): Int {
-        val chosen = FPS_FLOOR
-        Log.d(TAG, "pickFpsForDevice: FPS dikunci ke floor aman ($chosen) - lihat catatan kode")
-        return chosen
-    }
-
     /** Menyiapkan encoder + ScreenSource baru dan mulai streaming, memakai ukuran layar TERKINI. */
     private fun startEncoding(isRestart: Boolean) {
         val metrics = DisplayMetrics()
@@ -176,12 +158,16 @@ class ScreenRecordService : Service(), ConnectChecker {
         lastCaptureHeight = metrics.heightPixels
 
         // FPS ditentukan HANYA SEKALI di awal sesi live (bukan real-time selama live
-        // jalan). Alasan: mengubah FPS di tengah sesi butuh menyiapkan ulang encoder
-        // video, dan itu jalur yang sama dengan restart resolusi yang ternyata rapuh
-        // (MediaProjection tidak boleh dipakai berulang). Jadi supaya aman, FPS dikunci
-        // di awal sama seperti resolusi, memakai hasil cek performaDevice() di bawah.
+        // jalan) - dari savedFps, yaitu pilihan MANUAL user di UI (lihat MainActivity,
+        // RadioGroup rgFps). Alasan tidak real-time/otomatis: mengubah FPS di tengah
+        // sesi butuh menyiapkan ulang encoder video, jalur yang sama dengan restart
+        // resolusi yang ternyata rapuh (MediaProjection tidak boleh dipakai berulang).
+        // RIWAYAT: sempat dicoba deteksi otomatis lewat ActivityManager.isLowRamDevice()
+        // - TERBUKTI TIDAK CUKUP, device RAM cukup pun bisa chip video encoder-nya
+        // (Codec2) crash total di 60fps ("Codec2 component died", DEAD_OBJECT), bikin
+        // live macet + app hang. Makanya sekarang diserahkan ke user via toggle manual.
         if (!isRestart) {
-            selectedFps = pickFpsForDevice()
+            selectedFps = savedFps
         }
 
         // PENTING: token izin MediaProjection (savedResultCode/savedResultData) HANYA BOLEH
@@ -483,10 +469,9 @@ class ScreenRecordService : Service(), ConnectChecker {
         private const val TAG = "ScreenRecordService"
         private const val NOTIFICATION_ID = 1001
         private const val VIDEO_BITRATE = 3_000 * 1000 // 3 Mbps, cukup untuk 30fps di Android Go
-        // FPS_FLOOR/CEILING: batas bawah & atas untuk pemilihan otomatis di pickFpsForDevice().
-        // 30 sebagai batas minimum sesuai permintaan; 60 kalau device terdeteksi cukup kuat
-        // (bukan low-RAM device). Lihat catatan di pickFpsForDevice() kenapa ini dikunci di
-        // awal sesi saja, bukan berubah real-time.
+        // FPS_FLOOR/CEILING: batas bawah & atas untuk toggle manual di UI (RadioGroup rgFps).
+        // 30 = default aman; 60 = opsi coba-coba user (lihat riwayat kenapa deteksi
+        // otomatis dari RAM dibatalkan, di komentar startEncoding()).
         // https://github.com/pedroSG94/RootEncoder/issues/232 (referensi soal FPS & sync)
         private const val FPS_FLOOR = 30
         private const val FPS_CEILING = 60
@@ -501,6 +486,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         const val EXTRA_RESULT_DATA = "extra_result_data"
         const val EXTRA_RTMP_URL = "extra_rtmp_url"
         const val EXTRA_AUDIO_SOURCE = "extra_audio_source"
+        const val EXTRA_FPS = "extra_fps"
 
         const val AUDIO_SOURCE_INTERNAL = "internal"
         const val AUDIO_SOURCE_MIC = "mic"

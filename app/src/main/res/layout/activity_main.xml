@@ -75,6 +75,49 @@
     </RadioGroup>
 
     <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="@string/label_fps"
+        android:textStyle="bold" />
+
+    <!--
+      Pilihan manual, BUKAN otomatis. Sudah 2x dicoba deteksi otomatis (RAM, lalu
+      dibatalkan) dan hasilnya tidak bisa diandalkan - device dengan RAM cukup pun
+      bisa punya chip video encoder yang crash total di 60fps. Jadi biarkan user yang
+      putuskan sendiri sesuai pengalaman coba-coba di device masing-masing.
+    -->
+    <RadioGroup
+        android:id="@+id/rgFps"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/rbFps30"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:checked="true"
+            android:text="@string/fps_30" />
+
+        <RadioButton
+            android:id="@+id/rbFps60"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/fps_60" />
+    </RadioGroup>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/fps_warning"
+        android:textSize="12sp"
+        android:textStyle="italic" />
+
+    <TextView
         android:id="@+id/tvStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

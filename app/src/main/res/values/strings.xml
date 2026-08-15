@@ -7,6 +7,10 @@
     <string name="btn_stop">Stop Live</string>
     <string name="btn_save">Simpan RTMP URL &amp; Stream Key</string>
     <string name="toast_saved">Tersimpan</string>
+    <string name="label_fps">FPS</string>
+    <string name="fps_30">30 FPS (aman, default)</string>
+    <string name="fps_60">60 FPS (coba-coba)</string>
+    <string name="fps_warning">60fps bisa bikin sebagian HP crash total di encoder video-nya. Coba dulu sebentar sebelum dipakai live sungguhan.</string>
     <string name="status_idle">Status: belum live</string>
     <string name="status_live">Status: LIVE 🔴</string>
     <string name="status_connecting">Status: menghubungkan…</string>

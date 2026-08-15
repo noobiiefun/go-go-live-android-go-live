@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
 
         saveRtmpFields(rtmpUrl, streamKey)
         prefs.edit().putString(KEY_AUDIO_SOURCE, selectedAudioSourceValue()).apply()
+        prefs.edit().putInt(KEY_FPS, selectedFpsValue()).apply()
         Toast.makeText(this, getString(R.string.toast_saved), Toast.LENGTH_SHORT).show()
     }
 
@@ -138,6 +139,18 @@ class MainActivity : AppCompatActivity() {
             ScreenRecordService.AUDIO_SOURCE_MIX -> binding.rgAudioSource.check(R.id.rbAudioMix)
             else -> binding.rgAudioSource.check(R.id.rbAudioInternal)
         }
+
+        if (prefs.getInt(KEY_FPS, 30) == 60) {
+            binding.rgFps.check(R.id.rbFps60)
+        } else {
+            binding.rgFps.check(R.id.rbFps30)
+        }
+    }
+
+    /** Membaca RadioButton FPS yang dipilih user. Default 30 kalau entah kenapa tidak ada yang tercentang. */
+    private fun selectedFpsValue(): Int = when (binding.rgFps.checkedRadioButtonId) {
+        R.id.rbFps60 -> 60
+        else -> 30
     }
 
     private fun saveRtmpFields(rtmpUrl: String, streamKey: String) {
@@ -162,7 +175,11 @@ class MainActivity : AppCompatActivity() {
         // simpan sementara supaya bisa dipakai saat callback izin sukses
         pendingFullRtmpUrl = "$rtmpUrl/$streamKey"
         pendingAudioSource = selectedAudioSourceValue()
-        prefs.edit().putString(KEY_AUDIO_SOURCE, pendingAudioSource).apply()
+        pendingFps = selectedFpsValue()
+        prefs.edit()
+            .putString(KEY_AUDIO_SOURCE, pendingAudioSource)
+            .putInt(KEY_FPS, pendingFps)
+            .apply()
 
         binding.tvStatus.text = getString(R.string.status_connecting)
         maybeStartLive()
@@ -213,6 +230,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(ScreenRecordService.EXTRA_RESULT_DATA, data)
             putExtra(ScreenRecordService.EXTRA_RTMP_URL, pendingFullRtmpUrl)
             putExtra(ScreenRecordService.EXTRA_AUDIO_SOURCE, pendingAudioSource)
+            putExtra(ScreenRecordService.EXTRA_FPS, pendingFps)
         }
         ContextCompat.startForegroundService(this, intent)
 
@@ -235,10 +253,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private var pendingFullRtmpUrl: String = ""
         private var pendingAudioSource: String = ScreenRecordService.AUDIO_SOURCE_INTERNAL
+        private var pendingFps: Int = 30
 
         private const val PREFS_NAME = "go_go_live_prefs"
         private const val KEY_RTMP_URL = "rtmp_url"
         private const val KEY_STREAM_KEY = "stream_key"
         private const val KEY_AUDIO_SOURCE = "audio_source"
+        private const val KEY_FPS = "fps"
     }
 }

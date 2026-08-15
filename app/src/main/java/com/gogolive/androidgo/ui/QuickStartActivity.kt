@@ -46,6 +46,7 @@ class QuickStartActivity : AppCompatActivity() {
             val rtmpUrl = prefs.getString(KEY_RTMP_URL, null)
             val streamKey = prefs.getString(KEY_STREAM_KEY, null)
             val audioSource = prefs.getString(KEY_AUDIO_SOURCE, ScreenRecordService.AUDIO_SOURCE_INTERNAL)
+            val fps = prefs.getInt(KEY_FPS, 30)
 
             val intent = Intent(this, ScreenRecordService::class.java).apply {
                 action = ScreenRecordService.ACTION_START
@@ -53,6 +54,7 @@ class QuickStartActivity : AppCompatActivity() {
                 putExtra(ScreenRecordService.EXTRA_RESULT_DATA, result.data)
                 putExtra(ScreenRecordService.EXTRA_RTMP_URL, "$rtmpUrl/$streamKey")
                 putExtra(ScreenRecordService.EXTRA_AUDIO_SOURCE, audioSource)
+                putExtra(ScreenRecordService.EXTRA_FPS, fps)
             }
             ContextCompat.startForegroundService(this, intent)
         } else {
@@ -114,5 +116,6 @@ class QuickStartActivity : AppCompatActivity() {
         private const val KEY_RTMP_URL = "rtmp_url"
         private const val KEY_STREAM_KEY = "stream_key"
         private const val KEY_AUDIO_SOURCE = "audio_source"
+        private const val KEY_FPS = "fps"
     }
 }
