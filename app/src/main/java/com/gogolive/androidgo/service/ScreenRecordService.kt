@@ -154,8 +154,25 @@ class ScreenRecordService : Service(), ConnectChecker {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
-        lastCaptureWidth = metrics.widthPixels
-        lastCaptureHeight = metrics.heightPixels
+
+        // WAJIB: lebar & tinggi yang dikirim ke encoder H.264 HARUS kelipatan 16 (ukuran
+        // blok internal encoder/macroblock). Resolusi layar asli (mis. 720x1650 dari kasus
+        // spacedesk) SERING TIDAK kelipatan 16 (1650 / 16 = 103,125 - tidak bulat). Sebagian
+        // chip hardware encoder (terbukti: MediaTek "c2.mtk.avc.encoder" di HP ini) tidak
+        // cuma menolak halus, tapi CRASH TOTAL ("Codec2 component died", lalu RTMP kena
+        // "Broken pipe" karena encoder-nya sudah tidak ada) kalau dikasih ukuran ganjil
+        // begini - ini kejadian nyata di kasus kita, BUKAN cuma soal FPS seperti dugaan
+        // sebelumnya (terbukti tetap crash walau FPS sudah diturunkan ke 30).
+        // Dibulatkan KE BAWAH supaya tidak melebihi batas layar asli.
+        val alignedWidth = (metrics.widthPixels / 16) * 16
+        val alignedHeight = (metrics.heightPixels / 16) * 16
+        Log.d(
+            TAG,
+            "Resolusi asli ${metrics.widthPixels}x${metrics.heightPixels} -> " +
+                "dibulatkan ke kelipatan 16 jadi ${alignedWidth}x${alignedHeight}"
+        )
+        lastCaptureWidth = alignedWidth
+        lastCaptureHeight = alignedHeight
 
         // FPS ditentukan HANYA SEKALI di awal sesi live (bukan real-time selama live
         // jalan) - dari savedFps, yaitu pilihan MANUAL user di UI (lihat MainActivity,
@@ -207,7 +224,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         }
 
         val prepared = try {
-            genericStream.prepareVideo(metrics.widthPixels, metrics.heightPixels, VIDEO_BITRATE, selectedFps) &&
+            genericStream.prepareVideo(alignedWidth, alignedHeight, VIDEO_BITRATE, selectedFps) &&
                 genericStream.prepareAudio(AUDIO_SAMPLE_RATE, true, AUDIO_BITRATE)
         } catch (e: IllegalArgumentException) {
             Log.e(TAG, "Gagal prepare video/audio: ${e.message}")
@@ -231,7 +248,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         applyAudioSource(projection)
 
         genericStream.startStream(savedRtmpUrl)
-        Log.d(TAG, "Encoding dimulai pada ${metrics.widthPixels}x${metrics.heightPixels}, audio=$savedAudioSource")
+        Log.d(TAG, "Encoding dimulai pada ${alignedWidth}x${alignedHeight}, audio=$savedAudioSource")
     }
 
     /**
@@ -303,16 +320,22 @@ class ScreenRecordService : Service(), ConnectChecker {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
+        // Dibulatkan ke kelipatan 16 juga di sini, SAMA PERSIS seperti di startEncoding() -
+        // supaya perbandingannya konsisten (apple-to-apple). Kalau tidak, lastCaptureWidth/
+        // Height (yang sudah dibulatkan) tidak akan pernah cocok dengan metrics mentah,
+        // dan restart akan terus dianggap perlu tiap kali watcher berkala ini jalan.
+        val alignedWidth = (metrics.widthPixels / 16) * 16
+        val alignedHeight = (metrics.heightPixels / 16) * 16
 
-        if (metrics.widthPixels == lastCaptureWidth && metrics.heightPixels == lastCaptureHeight) {
-            Log.d(TAG, "Resolusi tidak berubah (${metrics.widthPixels}x${metrics.heightPixels}), restart dilewati")
+        if (alignedWidth == lastCaptureWidth && alignedHeight == lastCaptureHeight) {
+            Log.d(TAG, "Resolusi tidak berubah (${alignedWidth}x${alignedHeight}), restart dilewati")
             return
         }
 
         Log.d(
             TAG,
             "Resolusi berubah dari ${lastCaptureWidth}x${lastCaptureHeight} ke " +
-                "${metrics.widthPixels}x${metrics.heightPixels}, restart encoder..."
+                "${alignedWidth}x${alignedHeight}, restart encoder..."
         )
         restartEncodingForNewOrientation()
     }
