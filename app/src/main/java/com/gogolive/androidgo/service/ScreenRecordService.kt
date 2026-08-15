@@ -1,6 +1,5 @@
 package com.gogolive.androidgo.service
 
-import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -154,20 +153,17 @@ class ScreenRecordService : Service(), ConnectChecker {
      * dipakai berulang untuk sesi capture baru. Jadi supaya tidak mengulang masalah
      * yang sama, FPS dikunci di awal dan tidak diutak-atik lagi selama live berjalan.
      *
-     * Caranya menebak "kuat/tidaknya" device: pakai sinyal resmi Android
-     * (ActivityManager.isLowRamDevice(), dipakai sistem sendiri untuk menandai
-     * perangkat kelas Android Go/RAM rendah). Ini bukan benchmark performa nyata
-     * (tidak menjamin 60fps beneran mulus di semua kondisi), cuma perkiraan awal.
+     * RIWAYAT: sempat dicoba menebak lewat ActivityManager.isLowRamDevice() (device
+     * RAM cukup -> 60fps). TERBUKTI TIDAK CUKUP - device bisa saja RAM-nya besar tapi
+     * chip hardware video encoder-nya sendiri tidak sanggup 60fps, dan saat itu terjadi
+     * BUKAN cuma video patah-patah tapi encoder-nya CRASH TOTAL (Codec2 process mati,
+     * DEAD_OBJECT), yang bikin seluruh live macet + aplikasi hang (termasuk tombol Stop
+     * tidak merespon). Jadi sekarang floor aman (30fps) dipakai selalu, sampai ada cara
+     * yang lebih terbukti untuk mendeteksi kesanggupan encoder video secara aman.
      */
     private fun pickFpsForDevice(): Int {
-        val activityManager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
-        val isLowRamDevice = activityManager.isLowRamDevice
-        val chosen = if (isLowRamDevice) FPS_FLOOR else FPS_CEILING
-        Log.d(
-            TAG,
-            "pickFpsForDevice: isLowRamDevice=$isLowRamDevice -> FPS dipilih $chosen " +
-                "(floor=$FPS_FLOOR, ceiling=$FPS_CEILING)"
-        )
+        val chosen = FPS_FLOOR
+        Log.d(TAG, "pickFpsForDevice: FPS dikunci ke floor aman ($chosen) - lihat catatan kode")
         return chosen
     }
 
@@ -354,32 +350,38 @@ class ScreenRecordService : Service(), ConnectChecker {
     }
 
     private fun handleStop() {
-        // PENTING: dibungkus try/finally. Kalau genericStream.stopStream() melempar
-        // exception (bisa terjadi - sudah pernah kejadian di kasus lain), baris
-        // pembersihan (stopForeground/stopSelf/reset state) TETAP HARUS jalan lewat
-        // finally. Sebelumnya tanpa ini: kalau stopStream() gagal, service tidak
-        // pernah benar-benar berhenti (notifikasi/live nempel terus, harus force stop
-        // manual dari Pengaturan), dan state lama yang tidak kebersihan ikut merusak
-        // sesi live berikutnya (video tidak sampai ke YouTube).
-        try {
-            pendingRestart?.let { mainHandler.removeCallbacks(it) }
-            if (this::genericStream.isInitialized && genericStream.isStreaming) {
-                genericStream.stopStream()
+        // URUTAN PENTING: bagian "wajib cepat" (matikan notifikasi, tandai service
+        // berhenti) dijalankan LANGSUNG di sini secara síncron, SEBELUM mencoba
+        // membersihkan genericStream/mediaProjection. Alasan: kalau genericStream.
+        // stopStream() sampai macet/nunggu lama (misal karena hardware encoder chip
+        // sudah mati duluan - pernah kejadian: "Codec2 component died"), operasi itu
+        // jalan di MAIN THREAD dan akan MEMBEKUKAN SELURUH APLIKASI kalau ditunggu -
+        // termasuk bikin tombol Stop (baik di UI maupun di notifikasi) tidak merespon
+        // sama sekali, karena keduanya lewat jalur main thread yang sama.
+        pendingRestart?.let { mainHandler.removeCallbacks(it) }
+        savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
+        isRunning = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+
+        // Baru sekarang coba bersihkan encoder/projection - di background thread,
+        // "fire and forget". Kalau ini macet/gagal, TIDAK akan membekukan UI lagi,
+        // karena notifikasi & status "live" sudah dianggap berhenti sejak baris di atas.
+        Thread {
+            try {
+                if (this::genericStream.isInitialized && genericStream.isStreaming) {
+                    genericStream.stopStream()
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error saat stopStream() (background): ${e.message}", e)
             }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error saat stopStream(), lanjut bersihkan paksa: ${e.message}", e)
-        } finally {
             try {
                 mediaProjection?.stop()
             } catch (e: Throwable) {
-                Log.e(TAG, "Error saat mediaProjection.stop(): ${e.message}", e)
+                Log.e(TAG, "Error saat mediaProjection.stop() (background): ${e.message}", e)
             }
             mediaProjection = null
-            savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
-            isRunning = false
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        }
+        }.start()
     }
 
     private val windowManager
