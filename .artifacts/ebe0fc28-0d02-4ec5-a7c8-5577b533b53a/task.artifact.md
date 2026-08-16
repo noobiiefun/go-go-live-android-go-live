@@ -1,4 +1,4 @@
-- [x] Update Kotlin version to 2.4.10 in root `build.gradle`
-- [x] Update AGP to 8.13.2 in root `build.gradle`
-- [x] Sync Gradle and check for unresolved references
-- [x] Build `assembleDebug` to verify the fix
+- [x] Fix `SecurityException` by reusing `MediaProjection` instance in `ScreenRecordService.kt`
+- [x] Stabilize resolution watcher by comparing raw screen metrics
+- [x] Ensure correct notification `PendingIntent` flags for Android 14
+- [x] Verify build and update walkthrough

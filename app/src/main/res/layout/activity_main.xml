@@ -6,13 +6,27 @@
     android:orientation="vertical"
     android:padding="24dp">
 
-    <TextView
-        android:layout_width="wrap_content"
+    <RelativeLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/app_name"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="24dp" />
+        android:layout_marginBottom="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnOpenSettings"
+            style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:text="@string/btn_settings"
+            app:icon="@android:drawable/ic_menu_preferences" />
+    </RelativeLayout>
 
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
@@ -42,86 +56,10 @@
     </com.google.android.material.textfield.TextInputLayout>
 
     <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="@string/label_audio_source"
-        android:textStyle="bold" />
-
-    <RadioGroup
-        android:id="@+id/rgAudioSource"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
-
-        <RadioButton
-            android:id="@+id/rbAudioInternal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="@string/audio_source_internal" />
-
-        <RadioButton
-            android:id="@+id/rbAudioMic"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/audio_source_mic" />
-
-        <RadioButton
-            android:id="@+id/rbAudioMix"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/audio_source_mix" />
-    </RadioGroup>
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="@string/label_fps"
-        android:textStyle="bold" />
-
-    <!--
-      Pilihan manual, BUKAN otomatis. Sudah 2x dicoba deteksi otomatis (RAM, lalu
-      dibatalkan) dan hasilnya tidak bisa diandalkan - device dengan RAM cukup pun
-      bisa punya chip video encoder yang crash total di 60fps. Jadi biarkan user yang
-      putuskan sendiri sesuai pengalaman coba-coba di device masing-masing.
-    -->
-    <RadioGroup
-        android:id="@+id/rgFps"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <RadioButton
-            android:id="@+id/rbFps30"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:checked="true"
-            android:text="@string/fps_30" />
-
-        <RadioButton
-            android:id="@+id/rbFps60"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/fps_60" />
-    </RadioGroup>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="@string/fps_warning"
-        android:textSize="12sp"
-        android:textStyle="italic" />
-
-    <TextView
         android:id="@+id/tvStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="32dp"
         android:text="@string/status_idle"
         android:textSize="16sp" />
 
@@ -150,13 +88,6 @@
             android:text="@string/btn_stop" />
     </LinearLayout>
 
-    <!--
-      Tombol terpisah dari Start - supaya RTMP URL/Stream Key baru bisa disimpan
-      TANPA harus langsung mulai live. Penting untuk alur spacedesk: kalau update
-      key hanya bisa lewat tombol Start, key baru tidak pernah tersimpan kalau
-      user selanjutnya mulai live lewat Quick Settings Tile (bukan lewat Start di
-      UI ini) - tile akan baca key LAMA dari SharedPreferences.
-    -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnSave"
         style="@style/Widget.MaterialComponents.Button.OutlinedButton"
@@ -171,6 +102,6 @@
         android:layout_marginTop="32dp"
         android:textSize="12sp"
         android:textColor="#808080"
-        android:text="Setelah tekan Mulai Live, Android akan menampilkan dialog izin 'Mulai merekam atau melakukan cast?'. Ini wajib dan tidak bisa dilewati (keamanan Android). Setelah disetujui, kamu boleh kunci layar/pindah aplikasi lain, siaran tetap jalan di background selama notifikasi 'Go Go Live sedang live' masih ada di status bar." />
+        android:text="Setelah tekan Mulai Live, Android akan menampilkan dialog izin 'Mulai merekam atau melakukan cast?'. Ini wajib dan tidak bisa dilewati. Jika gambar tidak muncul di YouTube, buka 'Pengaturan Live' dan turunkan resolusi ke 480p." />
 
 </LinearLayout>

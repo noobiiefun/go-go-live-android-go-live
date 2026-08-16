@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/title_settings"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="24dp" />
+
+        <!-- RESOLUTION -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_resolution"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/rgResolution"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <RadioButton android:id="@+id/rbRes480p" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/res_480p" />
+            <RadioButton android:id="@+id/rbRes720p" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/res_720p" />
+        </RadioGroup>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/res_warning" android:textSize="12sp" android:textStyle="italic" android:layout_marginBottom="16dp" />
+
+        <!-- FPS -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_fps"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/rgFps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <RadioButton android:id="@+id/rbFps30" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/fps_30" />
+            <RadioButton android:id="@+id/rbFps60" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/fps_60" />
+        </RadioGroup>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/fps_warning" android:textSize="12sp" android:textStyle="italic" android:layout_marginBottom="16dp" />
+
+        <!-- BITRATE -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_bitrate"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/rgBitrate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <RadioButton android:id="@+id/rbBitrate500" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_500kbps" />
+            <RadioButton android:id="@+id/rbBitrate1" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_1mbps" />
+            <RadioButton android:id="@+id/rbBitrate2" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_2mbps" />
+            <RadioButton android:id="@+id/rbBitrate3" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_3mbps" />
+            <RadioButton android:id="@+id/rbBitrate4" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_4mbps" />
+        </RadioGroup>
+        <View android:layout_width="match_parent" android:layout_height="16dp" />
+
+        <!-- AUDIO SOURCE -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_audio_source"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/rgAudioSource"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <RadioButton android:id="@+id/rbAudioInternal" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/audio_source_internal" />
+            <RadioButton android:id="@+id/rbAudioMic" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/audio_source_mic" />
+            <RadioButton android:id="@+id/rbAudioMix" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/audio_source_mix" />
+        </RadioGroup>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnBack"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Kembali &amp; Simpan" />
+
+    </LinearLayout>
+</ScrollView>

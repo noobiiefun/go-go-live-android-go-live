@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import com.gogolive.androidgo.service.ScreenRecordService
 
 /**
@@ -43,18 +44,24 @@ class QuickStartActivity : AppCompatActivity() {
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val rtmpUrl = prefs.getString(KEY_RTMP_URL, null)
-            val streamKey = prefs.getString(KEY_STREAM_KEY, null)
+            val rtmpUrl = prefs.getString(KEY_RTMP_URL, null).orEmpty()
+            val streamKey = prefs.getString(KEY_STREAM_KEY, null).orEmpty()
             val audioSource = prefs.getString(KEY_AUDIO_SOURCE, ScreenRecordService.AUDIO_SOURCE_INTERNAL)
             val fps = prefs.getInt(KEY_FPS, 30)
+            val bitrate = prefs.getInt(KEY_BITRATE, 3000)
+            val resolution = prefs.getInt(KEY_RESOLUTION, 480)
+
+            val cleanUrl = rtmpUrl.removeSuffix("/")
 
             val intent = Intent(this, ScreenRecordService::class.java).apply {
                 action = ScreenRecordService.ACTION_START
                 putExtra(ScreenRecordService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(ScreenRecordService.EXTRA_RESULT_DATA, result.data)
-                putExtra(ScreenRecordService.EXTRA_RTMP_URL, "$rtmpUrl/$streamKey")
+                putExtra(ScreenRecordService.EXTRA_RTMP_URL, "$cleanUrl/$streamKey")
                 putExtra(ScreenRecordService.EXTRA_AUDIO_SOURCE, audioSource)
                 putExtra(ScreenRecordService.EXTRA_FPS, fps)
+                putExtra(ScreenRecordService.EXTRA_BITRATE, bitrate)
+                putExtra(ScreenRecordService.EXTRA_RESOLUTION, resolution)
             }
             ContextCompat.startForegroundService(this, intent)
         } else {
@@ -117,5 +124,7 @@ class QuickStartActivity : AppCompatActivity() {
         private const val KEY_STREAM_KEY = "stream_key"
         private const val KEY_AUDIO_SOURCE = "audio_source"
         private const val KEY_FPS = "fps"
+        private const val KEY_BITRATE = "bitrate"
+        private const val KEY_RESOLUTION = "resolution"
     }
 }

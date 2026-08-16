@@ -10,16 +10,21 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.IntentCompat
 import com.gogolive.androidgo.R
 import com.gogolive.androidgo.ui.MainActivity
 import com.pedro.common.ConnectChecker
+import com.pedro.library.util.BitrateAdapter
 import com.pedro.encoder.input.sources.audio.InternalAudioSource
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
 import com.pedro.encoder.input.sources.audio.MixAudioSource
@@ -65,6 +70,8 @@ class ScreenRecordService : Service(), ConnectChecker {
     private var savedRtmpUrl: String = ""
     private var savedAudioSource: String = AUDIO_SOURCE_INTERNAL
     private var savedFps: Int = FPS_FLOOR
+    private var savedBitrate: Int = 3000
+    private var savedResolution: Int = 480
 
     private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
     // Dicek terpisah dari orientasi. Alasan: skenario spacedesk lewat kabel data biasanya
@@ -83,11 +90,27 @@ class ScreenRecordService : Service(), ConnectChecker {
     private var selectedFps: Int = FPS_FLOOR
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingRestart: Runnable? = null
+    private var bitrateAdapter: BitrateAdapter? = null
+
+    // RECONNECT LOGIC
+    private var reconnectCount = 0
+    private val maxReconnectRetries = 5
+    private val reconnectDelayMs = 3000L
+
+    // RESOURCE LOCKS (Mencegah Android Go membunuh koneksi)
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
         // NoVideoSource() = placeholder sebelum ScreenSource asli dipasang setelah izin didapat.
         genericStream = GenericStream(baseContext, this, NoVideoSource(), MicrophoneSource())
+        
+        bitrateAdapter = BitrateAdapter { bitrate: Int ->
+            if (isRunning) {
+                genericStream.setVideoBitrateOnFly(bitrate)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -102,7 +125,7 @@ class ScreenRecordService : Service(), ConnectChecker {
 
     private fun handleStart(intent: Intent) {
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-        val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+        val data = IntentCompat.getParcelableExtra(intent, EXTRA_RESULT_DATA, Intent::class.java)
         val rtmpUrl = intent.getStringExtra(EXTRA_RTMP_URL).orEmpty()
 
         if (data == null || rtmpUrl.isEmpty()) {
@@ -119,11 +142,14 @@ class ScreenRecordService : Service(), ConnectChecker {
         // di pickFpsForDevice() kenapa deteksi otomatis dibatalkan). Default 30 kalau
         // extra ini entah kenapa tidak dikirim (misal dari versi lama yang belum update).
         savedFps = intent.getIntExtra(EXTRA_FPS, FPS_FLOOR).coerceIn(FPS_FLOOR, FPS_CEILING)
+        savedBitrate = intent.getIntExtra(EXTRA_BITRATE, 3000)
+        savedResolution = intent.getIntExtra(EXTRA_RESOLUTION, 480)
+
         lastOrientation = resources.configuration.orientation
         isRunning = true
-        // lastCaptureWidth/Height diisi di dalam startEncoding() setelah metrics dibaca,
-        // supaya nilainya konsisten sama persis dengan yang dipakai encoder.
-
+        reconnectCount = 0 // reset counter saat mulai baru
+        
+        acquireLocks()
         startForegroundWithNotification()
         startEncoding(isRestart = false)
         startPeriodicResolutionWatcher()
@@ -155,24 +181,43 @@ class ScreenRecordService : Service(), ConnectChecker {
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
-        // WAJIB: lebar & tinggi yang dikirim ke encoder H.264 HARUS kelipatan 16 (ukuran
-        // blok internal encoder/macroblock). Resolusi layar asli (mis. 720x1650 dari kasus
-        // spacedesk) SERING TIDAK kelipatan 16 (1650 / 16 = 103,125 - tidak bulat). Sebagian
-        // chip hardware encoder (terbukti: MediaTek "c2.mtk.avc.encoder" di HP ini) tidak
-        // cuma menolak halus, tapi CRASH TOTAL ("Codec2 component died", lalu RTMP kena
-        // "Broken pipe" karena encoder-nya sudah tidak ada) kalau dikasih ukuran ganjil
-        // begini - ini kejadian nyata di kasus kita, BUKAN cuma soal FPS seperti dugaan
-        // sebelumnya (terbukti tetap crash walau FPS sudah diturunkan ke 30).
-        // Dibulatkan KE BAWAH supaya tidak melebihi batas layar asli.
-        val alignedWidth = (metrics.widthPixels / 16) * 16
-        val alignedHeight = (metrics.heightPixels / 16) * 16
+        // LOGIKA DOWNSCALING:
+        // Jika user pilih 480p, kita hitung target resolusi yang proporsional.
+        // Misal layar asli 720x1600 (Portrait) -> 480 x (1600 * 480 / 720) = 480x1066.
+        val targetWidth: Int
+        val targetHeight: Int
+
+        if (savedResolution == 480) {
+            if (metrics.widthPixels < metrics.heightPixels) {
+                // Portrait
+                targetWidth = 480
+                targetHeight = (metrics.heightPixels * 480) / metrics.widthPixels
+            } else {
+                // Landscape
+                targetHeight = 480
+                targetWidth = (metrics.widthPixels * 480) / metrics.heightPixels
+            }
+            Log.d(TAG, "Downscaling aktif: 480p mode")
+        } else {
+            // Asli (720p atau lebih)
+            targetWidth = metrics.widthPixels
+            targetHeight = metrics.heightPixels
+            Log.d(TAG, "Resolusi asli aktif: 720p+ mode")
+        }
+
+        // WAJIB: lebar & tinggi yang dikirim ke encoder H.264 HARUS kelipatan 16
+        val alignedWidth = (targetWidth / 16) * 16
+        val alignedHeight = (targetHeight / 16) * 16
+        
         Log.d(
             TAG,
-            "Resolusi asli ${metrics.widthPixels}x${metrics.heightPixels} -> " +
-                "dibulatkan ke kelipatan 16 jadi ${alignedWidth}x${alignedHeight}"
+            "Resolusi layar ${metrics.widthPixels}x${metrics.heightPixels} -> " +
+                "Output encoder ${alignedWidth}x${alignedHeight}"
         )
-        lastCaptureWidth = alignedWidth
-        lastCaptureHeight = alignedHeight
+        // PENTING: Simpan resolusi ASLI layar, bukan hasil aligned/downscaled.
+        // Supaya pengecekan di watcher berkala konsisten dengan ukuran fisik HP.
+        lastCaptureWidth = metrics.widthPixels
+        lastCaptureHeight = metrics.heightPixels
 
         // FPS ditentukan HANYA SEKALI di awal sesi live (bukan real-time selama live
         // jalan) - dari savedFps, yaitu pilihan MANUAL user di UI (lihat MainActivity,
@@ -186,6 +231,9 @@ class ScreenRecordService : Service(), ConnectChecker {
         if (!isRestart) {
             selectedFps = savedFps
         }
+
+        // Bitrate dalam bps (bit per second). User menginput dalam Kbps.
+        val videoBitrateBps = savedBitrate * 1000
 
         // PENTING: token izin MediaProjection (savedResultCode/savedResultData) HANYA BOLEH
         // dipakai SEKALI untuk memanggil getMediaProjection(). Kalau dipanggil lagi saat restart
@@ -223,9 +271,36 @@ class ScreenRecordService : Service(), ConnectChecker {
             projection = fresh
         }
 
+        // 3.0.0+ untuk 30fps, 5.0.0+ untuk 60fps. Bitrate yang terlalu rendah pada 60fps
+        // sering bikin YouTube bingung (frame drop/pixelated), tapi terlalu tinggi
+        // bikin encoder Xiaomi A3 meledak.
+        // SEKARANG: Menggunakan pilihan manual user (videoBitrateBps).
+        val dynamicBitrate = videoBitrateBps
+
         val prepared = try {
-            genericStream.prepareVideo(alignedWidth, alignedHeight, VIDEO_BITRATE, selectedFps) &&
-                genericStream.prepareAudio(AUDIO_SAMPLE_RATE, true, AUDIO_BITRATE)
+            // PENTING: Gunakan default profile/level library agar hardware bisa memilih 
+            // jalur paling stabil secara otomatis. Menghapus hardcode 66/128.
+            // GOP (Keyframe Interval) tetap 2 detik untuk YouTube.
+            var success = genericStream.prepareVideo(
+                alignedWidth, alignedHeight, dynamicBitrate, selectedFps, 2
+            )
+            
+            // FALLBACK LOGIC: Kalau 60fps gagal di-prepare (biasanya karena encoder menolak),
+            // coba turunkan ke 30fps secara otomatis.
+            if (!success && selectedFps > FPS_FLOOR) {
+                Log.w(TAG, "Encoder menolak $selectedFps FPS, mencoba fallback ke $FPS_FLOOR FPS...")
+                mainHandler.post {
+                    Toast.makeText(baseContext, "HP tidak kuat 60fps, otomatis turun ke 30fps", Toast.LENGTH_LONG).show()
+                }
+                selectedFps = FPS_FLOOR
+                success = genericStream.prepareVideo(
+                    alignedWidth, alignedHeight, dynamicBitrate, FPS_FLOOR, 2
+                )
+            }
+            
+            // PENTING UNTUK DELAY SUARA: Gunakan MONO (false) dan 44100Hz.
+            // Mono mengurangi beban CPU 50% dibandingkan Stereo, sangat krusial di Android Go.
+            success && genericStream.prepareAudio(44100, false, 64 * 1000)
         } catch (e: IllegalArgumentException) {
             Log.e(TAG, "Gagal prepare video/audio: ${e.message}")
             false
@@ -233,6 +308,9 @@ class ScreenRecordService : Service(), ConnectChecker {
 
         if (!prepared) {
             Log.e(TAG, "Encoder video/audio tidak siap, berhenti")
+            mainHandler.post {
+                Toast.makeText(baseContext, "Error: HP tidak support resolusi/FPS ini", Toast.LENGTH_LONG).show()
+            }
             stopSelf()
             return
         }
@@ -247,6 +325,12 @@ class ScreenRecordService : Service(), ConnectChecker {
 
         applyAudioSource(projection)
 
+        // Mengaktifkan BitrateAdapter (Adaptive Bitrate). Ini sangat penting untuk mencegah
+        // "Broken Pipe". Jika internet melambat, bitrate akan turun otomatis alih-alih putus.
+        bitrateAdapter?.setMaxBitrate(videoBitrateBps)
+        genericStream.setVideoBitrateOnFly(videoBitrateBps)
+
+        Log.d(TAG, "Mulai streaming ke: ${savedRtmpUrl.take(20)}...")
         genericStream.startStream(savedRtmpUrl)
         Log.d(TAG, "Encoding dimulai pada ${alignedWidth}x${alignedHeight}, audio=$savedAudioSource")
     }
@@ -320,22 +404,16 @@ class ScreenRecordService : Service(), ConnectChecker {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
-        // Dibulatkan ke kelipatan 16 juga di sini, SAMA PERSIS seperti di startEncoding() -
-        // supaya perbandingannya konsisten (apple-to-apple). Kalau tidak, lastCaptureWidth/
-        // Height (yang sudah dibulatkan) tidak akan pernah cocok dengan metrics mentah,
-        // dan restart akan terus dianggap perlu tiap kali watcher berkala ini jalan.
-        val alignedWidth = (metrics.widthPixels / 16) * 16
-        val alignedHeight = (metrics.heightPixels / 16) * 16
-
-        if (alignedWidth == lastCaptureWidth && alignedHeight == lastCaptureHeight) {
-            Log.d(TAG, "Resolusi tidak berubah (${alignedWidth}x${alignedHeight}), restart dilewati")
+        
+        // Bandingkan langsung dengan resolusi fisik layar terakhir.
+        if (metrics.widthPixels == lastCaptureWidth && metrics.heightPixels == lastCaptureHeight) {
             return
         }
 
         Log.d(
             TAG,
-            "Resolusi berubah dari ${lastCaptureWidth}x${lastCaptureHeight} ke " +
-                "${alignedWidth}x${alignedHeight}, restart encoder..."
+            "Resolusi FISIK berubah dari ${lastCaptureWidth}x${lastCaptureHeight} ke " +
+                "${metrics.widthPixels}x${metrics.heightPixels}, restart encoder..."
         )
         restartEncodingForNewOrientation()
     }
@@ -370,6 +448,7 @@ class ScreenRecordService : Service(), ConnectChecker {
         pendingRestart?.let { mainHandler.removeCallbacks(it) }
         savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
         isRunning = false
+        releaseLocks()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
 
@@ -393,6 +472,28 @@ class ScreenRecordService : Service(), ConnectChecker {
         }.start()
     }
 
+    private fun releaseLocks() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal melepas locks: ${e.message}")
+        }
+    }
+
+    private fun acquireLocks() {
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GoGoLive::StreamingLock").apply {
+            acquire(10 * 60 * 1000L /* 10 minutes max safe fallback */)
+        }
+        
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "GoGoLive::WifiLock").apply {
+            acquire()
+        }
+        Log.d(TAG, "WakeLock & WifiLock didapatkan")
+    }
+
     private val windowManager
         get() = getSystemService(WINDOW_SERVICE) as android.view.WindowManager
 
@@ -412,7 +513,14 @@ class ScreenRecordService : Service(), ConnectChecker {
         val openAppIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(this, ScreenRecordService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
@@ -421,15 +529,24 @@ class ScreenRecordService : Service(), ConnectChecker {
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)
             .setContentIntent(openAppIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.btn_stop), stopPendingIntent)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+
             startForeground(
                 NOTIFICATION_ID,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -439,27 +556,67 @@ class ScreenRecordService : Service(), ConnectChecker {
 
     override fun onConnectionStarted(url: String) {
         Log.d(TAG, "Mulai konek ke $url")
+        mainHandler.post {
+            Toast.makeText(baseContext, "Menghubungkan ke YouTube...", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onConnectionSuccess() {
         Log.d(TAG, "RTMP terhubung, live dimulai")
+        reconnectCount = 0 // Reset counter setelah sukses tersambung
+        mainHandler.post {
+            Toast.makeText(baseContext, "BERHASIL! Live sudah masuk ke YouTube", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onConnectionFailed(reason: String) {
         Log.e(TAG, "RTMP gagal konek: $reason")
-        handleStop()
+        attemptReconnect(reason)
     }
 
     override fun onNewBitrate(bitrate: Long) {
-        // opsional: bisa dipakai untuk menampilkan bitrate real-time di notifikasi
+        bitrateAdapter?.adaptBitrate(bitrate)
     }
 
     override fun onDisconnect() {
         Log.d(TAG, "RTMP terputus")
+        if (isRunning) {
+            attemptReconnect("Terputus")
+        }
+    }
+
+    private fun attemptReconnect(reason: String) {
+        if (reconnectCount < maxReconnectRetries) {
+            reconnectCount++
+            mainHandler.post {
+                Toast.makeText(baseContext, "Koneksi drop ($reason), menyambung kembali ($reconnectCount/$maxReconnectRetries)...", Toast.LENGTH_SHORT).show()
+            }
+            mainHandler.postDelayed({
+                if (isRunning && savedRtmpUrl.isNotEmpty()) {
+                    Log.d(TAG, "Mencoba reconnect dengan reset full...")
+                    try {
+                        if (genericStream.isStreaming) genericStream.stopStream()
+                        // Re-prepare dan start stream ulang
+                        startEncoding(isRestart = true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Gagal restart encoding: ${e.message}")
+                        genericStream.startStream(savedRtmpUrl)
+                    }
+                }
+            }, reconnectDelayMs)
+        } else {
+            mainHandler.post {
+                Toast.makeText(baseContext, "Gagal konek setelah $maxReconnectRetries percobaan: $reason", Toast.LENGTH_LONG).show()
+            }
+            handleStop()
+        }
     }
 
     override fun onAuthError() {
         Log.e(TAG, "RTMP auth error - cek stream key")
+        mainHandler.post {
+            Toast.makeText(baseContext, "Auth Error: Cek Stream Key!", Toast.LENGTH_LONG).show()
+        }
         handleStop()
     }
 
@@ -491,15 +648,13 @@ class ScreenRecordService : Service(), ConnectChecker {
     companion object {
         private const val TAG = "ScreenRecordService"
         private const val NOTIFICATION_ID = 1001
-        private const val VIDEO_BITRATE = 3_000 * 1000 // 3 Mbps, cukup untuk 30fps di Android Go
+
         // FPS_FLOOR/CEILING: batas bawah & atas untuk toggle manual di UI (RadioGroup rgFps).
         // 30 = default aman; 60 = opsi coba-coba user (lihat riwayat kenapa deteksi
         // otomatis dari RAM dibatalkan, di komentar startEncoding()).
-        // https://github.com/pedroSG94/RootEncoder/issues/232 (referensi soal FPS & sync)
         private const val FPS_FLOOR = 30
         private const val FPS_CEILING = 60
-        private const val AUDIO_SAMPLE_RATE = 44100
-        private const val AUDIO_BITRATE = 128 * 1000
+        
         private const val ORIENTATION_DEBOUNCE_MS = 500L
         private const val RESOLUTION_WATCH_INTERVAL_MS = 5_000L
 
@@ -510,6 +665,8 @@ class ScreenRecordService : Service(), ConnectChecker {
         const val EXTRA_RTMP_URL = "extra_rtmp_url"
         const val EXTRA_AUDIO_SOURCE = "extra_audio_source"
         const val EXTRA_FPS = "extra_fps"
+        const val EXTRA_BITRATE = "extra_bitrate"
+        const val EXTRA_RESOLUTION = "extra_resolution"
 
         const val AUDIO_SOURCE_INTERNAL = "internal"
         const val AUDIO_SOURCE_MIC = "mic"
