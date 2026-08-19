@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import com.gogolive.androidgo.R
 import com.gogolive.androidgo.ui.QuickStartActivity
 
 /**
@@ -60,9 +61,39 @@ class LiveQuickTileService : TileService() {
     }
 
     private fun refreshTileState() {
-        qsTile?.apply {
-            state = if (ScreenRecordService.isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-            updateTile()
+        val tile = qsTile ?: return
+        
+        when {
+            ScreenRecordService.isStreamingSuccessfully -> {
+                tile.state = Tile.STATE_ACTIVE
+                tile.label = getString(R.string.tile_live)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    tile.stateDescription = "Stable"
+                }
+            }
+            ScreenRecordService.isAttemptingReconnect -> {
+                tile.state = Tile.STATE_ACTIVE
+                tile.label = getString(R.string.tile_reconnecting)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    tile.stateDescription = "Connecting..."
+                }
+            }
+            ScreenRecordService.isRunning -> {
+                tile.state = Tile.STATE_ACTIVE
+                tile.label = getString(R.string.tile_connecting)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    tile.stateDescription = "Starting..."
+                }
+            }
+            else -> {
+                tile.state = Tile.STATE_INACTIVE
+                tile.label = getString(R.string.tile_label)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    tile.stateDescription = ""
+                }
+            }
         }
+        
+        tile.updateTile()
     }
 }

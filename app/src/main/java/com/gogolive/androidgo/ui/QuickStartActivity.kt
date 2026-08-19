@@ -70,6 +70,15 @@ class QuickStartActivity : AppCompatActivity() {
         finish()
     }
 
+    private val notifPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Lanjut ke pengecekan audio permission terlepas dari notifikasi diizinkan atau tidak,
+        // karena notifikasi bukan permission "dangerous" yang mematikan fungsi utama (streaming),
+        // hanya mempengaruhi visibilitas tombol Stop.
+        checkAudioPermission()
+    }
+
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -106,6 +115,24 @@ class QuickStartActivity : AppCompatActivity() {
         projectionManager =
             getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
+        checkNotificationPermission()
+    }
+
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotifPermission = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            if (!hasNotifPermission) {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        checkAudioPermission()
+    }
+
+    private fun checkAudioPermission() {
         val hasAudioPermission = ContextCompat.checkSelfPermission(
             this, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED

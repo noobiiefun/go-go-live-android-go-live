@@ -30,6 +30,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
+            <RadioButton android:id="@+id/rbRes360p" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/res_360p" />
             <RadioButton android:id="@+id/rbRes480p" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/res_480p" />
             <RadioButton android:id="@+id/rbRes720p" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/res_720p" />
         </RadioGroup>
@@ -65,6 +66,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
             <RadioButton android:id="@+id/rbBitrate500" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_500kbps" />
+            <RadioButton android:id="@+id/rbBitrate800" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_800kbps" />
             <RadioButton android:id="@+id/rbBitrate1" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_1mbps" />
             <RadioButton android:id="@+id/rbBitrate2" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_2mbps" />
             <RadioButton android:id="@+id/rbBitrate3" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bitrate_3mbps" />

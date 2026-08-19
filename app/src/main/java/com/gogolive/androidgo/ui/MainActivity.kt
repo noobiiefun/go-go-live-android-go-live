@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -18,12 +19,19 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.gogolive.androidgo.R
 import com.gogolive.androidgo.databinding.ActivityMainBinding
 import com.gogolive.androidgo.service.ScreenRecordService
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var projectionManager: MediaProjectionManager
     private lateinit var prefs: SharedPreferences
+
+    private val stateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            updateStatusText()
+        }
+    }
 
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -73,12 +81,40 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (ScreenRecordService.isRunning) {
-            binding.tvStatus.text = getString(R.string.status_live)
-            binding.btnStart.isEnabled = false
-            binding.btnStop.isEnabled = true
+        val filter = IntentFilter(ScreenRecordService.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
-            resetStatusToIdle()
+            registerReceiver(stateReceiver, filter)
+        }
+        updateStatusText()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        unregisterReceiver(stateReceiver)
+    }
+
+    private fun updateStatusText() {
+        when {
+            ScreenRecordService.isStreamingSuccessfully -> {
+                binding.tvStatus.text = getString(R.string.status_live)
+                binding.btnStart.isEnabled = false
+                binding.btnStop.isEnabled = true
+            }
+            ScreenRecordService.isAttemptingReconnect -> {
+                binding.tvStatus.text = getString(R.string.status_reconnecting)
+                binding.btnStart.isEnabled = false
+                binding.btnStop.isEnabled = true
+            }
+            ScreenRecordService.isRunning -> {
+                binding.tvStatus.text = getString(R.string.status_connecting)
+                binding.btnStart.isEnabled = false
+                binding.btnStop.isEnabled = true
+            }
+            else -> {
+                resetStatusToIdle()
+            }
         }
     }
 

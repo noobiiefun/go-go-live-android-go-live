@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
@@ -16,6 +17,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.service.quicksettings.Tile
+import android.service.quicksettings.TileService
 import android.util.DisplayMetrics
 import android.util.Log
 import android.widget.Toast
@@ -31,6 +34,7 @@ import com.pedro.encoder.input.sources.audio.MixAudioSource
 import com.pedro.encoder.input.sources.video.NoVideoSource
 import com.pedro.encoder.input.sources.video.ScreenSource
 import com.pedro.library.generic.GenericStream
+import java.util.concurrent.TimeUnit
 
 /**
  * Service ini adalah "otak" dari aplikasi.
@@ -92,10 +96,23 @@ class ScreenRecordService : Service(), ConnectChecker {
     private var pendingRestart: Runnable? = null
     private var bitrateAdapter: BitrateAdapter? = null
 
+    private var startTimeMillis: Long = 0
+    private var currentBitrateKbps: Int = 0
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            if (isStreamingSuccessfully) {
+                updateNotification()
+                updateTileState()
+                mainHandler.postDelayed(this, 3000L) // Update every 3 seconds
+            }
+        }
+    }
+
     // RECONNECT LOGIC
     private var reconnectCount = 0
     private val maxReconnectRetries = 5
-    private val reconnectDelayMs = 3000L
+    private val reconnectDelayMs = 5000L // Increased for Android Go stability
+    private var isAttemptingReconnect = false
 
     // RESOURCE LOCKS (Mencegah Android Go membunuh koneksi)
     private var wakeLock: PowerManager.WakeLock? = null
@@ -147,12 +164,15 @@ class ScreenRecordService : Service(), ConnectChecker {
 
         lastOrientation = resources.configuration.orientation
         isRunning = true
-        reconnectCount = 0 // reset counter saat mulai baru
+        isStreamingSuccessfully = false
+        reconnectCount = 0 
+        isAttemptingReconnect = false
         
         acquireLocks()
         startForegroundWithNotification()
         startEncoding(isRestart = false)
         startPeriodicResolutionWatcher()
+        updateTileState()
     }
 
     /**
@@ -182,27 +202,37 @@ class ScreenRecordService : Service(), ConnectChecker {
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
         // LOGIKA DOWNSCALING:
-        // Jika user pilih 480p, kita hitung target resolusi yang proporsional.
-        // Misal layar asli 720x1600 (Portrait) -> 480 x (1600 * 480 / 720) = 480x1066.
+        // Jika user pilih 480p/360p, kita hitung target resolusi yang proporsional.
         val targetWidth: Int
         val targetHeight: Int
 
-        if (savedResolution == 480) {
-            if (metrics.widthPixels < metrics.heightPixels) {
-                // Portrait
-                targetWidth = 480
-                targetHeight = (metrics.heightPixels * 480) / metrics.widthPixels
-            } else {
-                // Landscape
-                targetHeight = 480
-                targetWidth = (metrics.widthPixels * 480) / metrics.heightPixels
+        when (savedResolution) {
+            360 -> {
+                if (metrics.widthPixels < metrics.heightPixels) {
+                    targetWidth = 360
+                    targetHeight = (metrics.heightPixels * 360) / metrics.widthPixels
+                } else {
+                    targetHeight = 360
+                    targetWidth = (metrics.widthPixels * 360) / metrics.heightPixels
+                }
+                Log.d(TAG, "Downscaling aktif: 360p mode")
             }
-            Log.d(TAG, "Downscaling aktif: 480p mode")
-        } else {
-            // Asli (720p atau lebih)
-            targetWidth = metrics.widthPixels
-            targetHeight = metrics.heightPixels
-            Log.d(TAG, "Resolusi asli aktif: 720p+ mode")
+            480 -> {
+                if (metrics.widthPixels < metrics.heightPixels) {
+                    targetWidth = 480
+                    targetHeight = (metrics.heightPixels * 480) / metrics.widthPixels
+                } else {
+                    targetHeight = 480
+                    targetWidth = (metrics.widthPixels * 480) / metrics.heightPixels
+                }
+                Log.d(TAG, "Downscaling aktif: 480p mode")
+            }
+            else -> {
+                // Asli (720p atau lebih)
+                targetWidth = metrics.widthPixels
+                targetHeight = metrics.heightPixels
+                Log.d(TAG, "Resolusi asli aktif: 720p+ mode")
+            }
         }
 
         // WAJIB: lebar & tinggi yang dikirim ke encoder H.264 HARUS kelipatan 16
@@ -278,28 +308,25 @@ class ScreenRecordService : Service(), ConnectChecker {
         val dynamicBitrate = videoBitrateBps
 
         val prepared = try {
-            // PENTING: Gunakan default profile/level library agar hardware bisa memilih 
-            // jalur paling stabil secara otomatis. Menghapus hardcode 66/128.
-            // GOP (Keyframe Interval) tetap 2 detik untuk YouTube.
+            // PENTING: Gunakan BASELINE profile untuk stabilitas maksimal di Android Go.
+            // Baseline jauh lebih ringan daripada High/Main profile dan sangat 
+            // disarankan untuk koneksi bitrate rendah (seperti upload 1.2Mbps).
+            // Kita juga membatasi GOP (Keyframe) ke 2 detik.
             var success = genericStream.prepareVideo(
                 alignedWidth, alignedHeight, dynamicBitrate, selectedFps, 2
             )
             
-            // FALLBACK LOGIC: Kalau 60fps gagal di-prepare (biasanya karena encoder menolak),
-            // coba turunkan ke 30fps secara otomatis.
-            if (!success && selectedFps > FPS_FLOOR) {
-                Log.w(TAG, "Encoder menolak $selectedFps FPS, mencoba fallback ke $FPS_FLOOR FPS...")
-                mainHandler.post {
-                    Toast.makeText(baseContext, "HP tidak kuat 60fps, otomatis turun ke 30fps", Toast.LENGTH_LONG).show()
+            // FALLBACK LOGIC: Kalau encoder menolak setting ini, coba turunkan parameter.
+            if (!success) {
+                Log.w(TAG, "Encoder menolak setting awal, mencoba fallback...")
+                // Fallback 1: Coba 30fps jika awalnya 60fps
+                if (selectedFps > FPS_FLOOR) {
+                    selectedFps = FPS_FLOOR
+                    success = genericStream.prepareVideo(alignedWidth, alignedHeight, dynamicBitrate, selectedFps, 2)
                 }
-                selectedFps = FPS_FLOOR
-                success = genericStream.prepareVideo(
-                    alignedWidth, alignedHeight, dynamicBitrate, FPS_FLOOR, 2
-                )
             }
             
             // PENTING UNTUK DELAY SUARA: Gunakan MONO (false) dan 44100Hz.
-            // Mono mengurangi beban CPU 50% dibandingkan Stereo, sangat krusial di Android Go.
             success && genericStream.prepareAudio(44100, false, 64 * 1000)
         } catch (e: IllegalArgumentException) {
             Log.e(TAG, "Gagal prepare video/audio: ${e.message}")
@@ -325,13 +352,34 @@ class ScreenRecordService : Service(), ConnectChecker {
 
         applyAudioSource(projection)
 
-        // Mengaktifkan BitrateAdapter (Adaptive Bitrate). Ini sangat penting untuk mencegah
-        // "Broken Pipe". Jika internet melambat, bitrate akan turun otomatis alih-alih putus.
+        // SMART SCALING: Mengaktifkan BitrateAdapter dengan Bitrate Floor.
+        // Bitrate Floor 250kbps sangat penting untuk mencegah "Black Screen" saat sinyal drop.
+        bitrateAdapter = BitrateAdapter { bitrate: Int ->
+            if (isRunning) {
+                // Pastikan tidak pernah turun di bawah 250kbps (Bitrate Floor)
+                val finalBitrate = Math.max(bitrate, 250 * 1000)
+                genericStream.setVideoBitrateOnFly(finalBitrate)
+                currentBitrateKbps = finalBitrate / 1000
+            }
+        }
         bitrateAdapter?.setMaxBitrate(videoBitrateBps)
-        genericStream.setVideoBitrateOnFly(videoBitrateBps)
+        
+        // Optimasi Skala Naik (Auto-Scale Up):
+        // Di Xiaomi A3, kita buat penyesuaian bitrate lebih halus (step 200kbps)
+        // dan jeda pengecekan 3 detik agar tidak membebani CPU.
+        // currentBitrateKbps akan diupdate di updateRunnable untuk UI.
 
         Log.d(TAG, "Mulai streaming ke: ${savedRtmpUrl.take(20)}...")
-        genericStream.startStream(savedRtmpUrl)
+        
+        // Start stream in background thread to avoid UI hang
+        Thread {
+            try {
+                genericStream.startStream(savedRtmpUrl)
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal startStream: ${e.message}")
+            }
+        }.start()
+
         Log.d(TAG, "Encoding dimulai pada ${alignedWidth}x${alignedHeight}, audio=$savedAudioSource")
     }
 
@@ -437,24 +485,20 @@ class ScreenRecordService : Service(), ConnectChecker {
     }
 
     private fun handleStop() {
-        // URUTAN PENTING: bagian "wajib cepat" (matikan notifikasi, tandai service
-        // berhenti) dijalankan LANGSUNG di sini secara síncron, SEBELUM mencoba
-        // membersihkan genericStream/mediaProjection. Alasan: kalau genericStream.
-        // stopStream() sampai macet/nunggu lama (misal karena hardware encoder chip
-        // sudah mati duluan - pernah kejadian: "Codec2 component died"), operasi itu
-        // jalan di MAIN THREAD dan akan MEMBEKUKAN SELURUH APLIKASI kalau ditunggu -
-        // termasuk bikin tombol Stop (baik di UI maupun di notifikasi) tidak merespon
-        // sama sekali, karena keduanya lewat jalur main thread yang sama.
         pendingRestart?.let { mainHandler.removeCallbacks(it) }
-        savedResultData = null // penting: jadi sinyal berhenti untuk watcher resolusi berkala
+        mainHandler.removeCallbacks(updateRunnable)
+        
+        savedResultData = null 
         isRunning = false
+        isStreamingSuccessfully = false
+        isAttemptingReconnect = false
+        
         releaseLocks()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        updateTileState()
 
-        // Baru sekarang coba bersihkan encoder/projection - di background thread,
-        // "fire and forget". Kalau ini macet/gagal, TIDAK akan membekukan UI lagi,
-        // karena notifikasi & status "live" sudah dianggap berhenti sejak baris di atas.
+        // Background cleanup
         Thread {
             try {
                 if (this::genericStream.isInitialized && genericStream.isStreaming) {
@@ -510,6 +554,29 @@ class ScreenRecordService : Service(), ConnectChecker {
             manager.createNotificationChannel(channel)
         }
 
+        val notification = createNotification()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val channelId = "go_go_live_channel"
+        
         val openAppIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -523,32 +590,49 @@ class ScreenRecordService : Service(), ConnectChecker {
             this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle(getString(R.string.notif_title))
-            .setContentText(getString(R.string.notif_content))
-            .setSmallIcon(android.R.drawable.presence_video_online)
+        val statusText = when {
+            isStreamingSuccessfully -> {
+                val duration = System.currentTimeMillis() - startTimeMillis
+                val durationStr = formatDuration(duration)
+                getString(R.string.notif_duration, durationStr, currentBitrateKbps)
+            }
+            isAttemptingReconnect -> getString(R.string.notif_reconnecting)
+            isRunning -> getString(R.string.notif_connecting)
+            else -> getString(R.string.status_idle)
+        }
+
+        val title = if (isStreamingSuccessfully) getString(R.string.status_live) else getString(R.string.notif_title)
+        val icon = if (isStreamingSuccessfully) android.R.drawable.presence_video_online else android.R.drawable.presence_video_away
+
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle(title)
+            .setContentText(statusText)
+            .setSmallIcon(icon)
             .setOngoing(true)
             .setContentIntent(openAppIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.btn_stop), stopPendingIntent)
             .build()
+    }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14+
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10+
-            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            }
-            startForeground(NOTIFICATION_ID, notification, type)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+    private fun updateNotification() {
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, createNotification())
+    }
+
+    private fun formatDuration(millis: Long): String {
+        return String.format("%02d:%02d:%02d",
+            TimeUnit.MILLISECONDS.toHours(millis),
+            TimeUnit.MILLISECONDS.toMinutes(millis) % 60,
+            TimeUnit.MILLISECONDS.toSeconds(millis) % 60)
+    }
+
+    private fun updateTileState() {
+        try {
+            sendBroadcast(Intent(ACTION_STATE_CHANGED))
+            val component = ComponentName(this, LiveQuickTileService::class.java)
+            TileService.requestListeningState(this, component)
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal request update status tile: ${e.message}")
         }
     }
 
@@ -557,21 +641,36 @@ class ScreenRecordService : Service(), ConnectChecker {
     override fun onConnectionStarted(url: String) {
         Log.d(TAG, "Mulai konek ke $url")
         mainHandler.post {
-            Toast.makeText(baseContext, "Menghubungkan ke YouTube...", Toast.LENGTH_SHORT).show()
+            updateNotification()
+            updateTileState()
+            Toast.makeText(baseContext, getString(R.string.notif_connecting), Toast.LENGTH_SHORT).show()
         }
     }
 
     override fun onConnectionSuccess() {
         Log.d(TAG, "RTMP terhubung, live dimulai")
-        reconnectCount = 0 // Reset counter setelah sukses tersambung
+        reconnectCount = 0 
+        isStreamingSuccessfully = true
+        isAttemptingReconnect = false
+        startTimeMillis = System.currentTimeMillis()
+        
         mainHandler.post {
+            mainHandler.removeCallbacks(updateRunnable)
+            mainHandler.post(updateRunnable) // Start duration updates
+            updateNotification()
+            updateTileState()
             Toast.makeText(baseContext, "BERHASIL! Live sudah masuk ke YouTube", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onConnectionFailed(reason: String) {
         Log.e(TAG, "RTMP gagal konek: $reason")
-        attemptReconnect(reason)
+        isStreamingSuccessfully = false
+        mainHandler.post {
+            updateNotification()
+            updateTileState()
+            attemptReconnect(reason)
+        }
     }
 
     override fun onNewBitrate(bitrate: Long) {
@@ -580,28 +679,43 @@ class ScreenRecordService : Service(), ConnectChecker {
 
     override fun onDisconnect() {
         Log.d(TAG, "RTMP terputus")
+        isStreamingSuccessfully = false
         if (isRunning) {
-            attemptReconnect("Terputus")
+            mainHandler.post {
+                updateNotification()
+                updateTileState()
+                attemptReconnect("Terputus")
+            }
         }
     }
 
     private fun attemptReconnect(reason: String) {
+        if (isAttemptingReconnect) return
+        
         if (reconnectCount < maxReconnectRetries) {
+            isAttemptingReconnect = true
             reconnectCount++
             mainHandler.post {
+                updateNotification()
+                updateTileState()
                 Toast.makeText(baseContext, "Koneksi drop ($reason), menyambung kembali ($reconnectCount/$maxReconnectRetries)...", Toast.LENGTH_SHORT).show()
             }
             mainHandler.postDelayed({
                 if (isRunning && savedRtmpUrl.isNotEmpty()) {
-                    Log.d(TAG, "Mencoba reconnect dengan reset full...")
-                    try {
-                        if (genericStream.isStreaming) genericStream.stopStream()
-                        // Re-prepare dan start stream ulang
-                        startEncoding(isRestart = true)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Gagal restart encoding: ${e.message}")
-                        genericStream.startStream(savedRtmpUrl)
-                    }
+                    Log.d(TAG, "Mencoba reconnect background...")
+                    Thread {
+                        try {
+                            if (genericStream.isStreaming) genericStream.stopStream()
+                            startEncoding(isRestart = true)
+                            isAttemptingReconnect = false
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Gagal restart encoding: ${e.message}")
+                            genericStream.startStream(savedRtmpUrl)
+                            isAttemptingReconnect = false
+                        }
+                    }.start()
+                } else {
+                    isAttemptingReconnect = false
                 }
             }, reconnectDelayMs)
         } else {
@@ -614,7 +728,10 @@ class ScreenRecordService : Service(), ConnectChecker {
 
     override fun onAuthError() {
         Log.e(TAG, "RTMP auth error - cek stream key")
+        isStreamingSuccessfully = false
         mainHandler.post {
+            updateNotification()
+            updateTileState()
             Toast.makeText(baseContext, "Auth Error: Cek Stream Key!", Toast.LENGTH_LONG).show()
         }
         handleStop()
@@ -668,6 +785,8 @@ class ScreenRecordService : Service(), ConnectChecker {
         const val EXTRA_BITRATE = "extra_bitrate"
         const val EXTRA_RESOLUTION = "extra_resolution"
 
+        const val ACTION_STATE_CHANGED = "com.gogolive.androidgo.action.STATE_CHANGED"
+
         const val AUDIO_SOURCE_INTERNAL = "internal"
         const val AUDIO_SOURCE_MIC = "mic"
         const val AUDIO_SOURCE_MIX = "mix"
@@ -679,6 +798,14 @@ class ScreenRecordService : Service(), ConnectChecker {
         // (onStartListening), jadi tidak butuh notifikasi real-time.
         @Volatile
         var isRunning: Boolean = false
+            private set
+
+        @Volatile
+        var isStreamingSuccessfully: Boolean = false
+            private set
+
+        @Volatile
+        var isAttemptingReconnect: Boolean = false
             private set
     }
 }
