@@ -275,7 +275,7 @@ class ScreenRecordService : Service(), ConnectChecker {
             val existing = mediaProjection
             if (existing == null) {
                 Log.e(TAG, "Restart dibatalkan: tidak ada MediaProjection aktif")
-                stopSelf()
+                handleStop() // PENTING: Panggil handleStop untuk cleanup penuh
                 return
             }
             projection = existing
@@ -284,7 +284,7 @@ class ScreenRecordService : Service(), ConnectChecker {
             val fresh = mediaProjectionManager.getMediaProjection(savedResultCode, data)
             if (fresh == null) {
                 Log.e(TAG, "Gagal mendapatkan MediaProjection")
-                stopSelf()
+                handleStop()
                 return
             }
             mediaProjection = fresh
@@ -295,6 +295,7 @@ class ScreenRecordService : Service(), ConnectChecker {
             fresh.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
                     Log.d(TAG, "MediaProjection dihentikan oleh sistem (misal user cabut izin lewat status bar)")
+                    mainHandler.post { handleStop() }
                 }
             }, mainHandler)
 
@@ -495,24 +496,29 @@ class ScreenRecordService : Service(), ConnectChecker {
         
         releaseLocks()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
         updateTileState()
 
-        // Background cleanup
+        // Background cleanup yang lebih agresif untuk membebaskan hardware encoder.
+        // PENTING: genericStream.release() HARUS dipanggil agar aplikasi lain bisa
+        // memakai MediaCodec hardware. Tanpa ini, hardware akan terkunci (leak).
         Thread {
             try {
-                if (this::genericStream.isInitialized && genericStream.isStreaming) {
-                    genericStream.stopStream()
+                if (this::genericStream.isInitialized) {
+                    if (genericStream.isStreaming) genericStream.stopStream()
+                    genericStream.release()
                 }
             } catch (e: Throwable) {
-                Log.e(TAG, "Error saat stopStream() (background): ${e.message}", e)
+                Log.e(TAG, "Error saat release genericStream: ${e.message}", e)
             }
             try {
                 mediaProjection?.stop()
             } catch (e: Throwable) {
-                Log.e(TAG, "Error saat mediaProjection.stop() (background): ${e.message}", e)
+                Log.e(TAG, "Error saat mediaProjection.stop(): ${e.message}", e)
             }
             mediaProjection = null
+            
+            // stopSelf dipanggil TERAKHIR setelah semua resource dipastikan bebas.
+            mainHandler.post { stopSelf() }
         }.start()
     }
 
@@ -754,12 +760,18 @@ class ScreenRecordService : Service(), ConnectChecker {
     override fun onDestroy() {
         super.onDestroy()
         pendingRestart?.let { mainHandler.removeCallbacks(it) }
-        if (this::genericStream.isInitialized && genericStream.isStreaming) {
-            genericStream.stopStream()
+        mainHandler.removeCallbacks(updateRunnable)
+        
+        if (this::genericStream.isInitialized) {
+            if (genericStream.isStreaming) genericStream.stopStream()
+            genericStream.release()
         }
+        
         mediaProjection?.stop()
         mediaProjection = null
-        isRunning = false // jaga-jaga kalau service dimatikan sistem (bukan lewat handleStop())
+        isRunning = false 
+        isStreamingSuccessfully = false
+        releaseLocks()
     }
 
     companion object {

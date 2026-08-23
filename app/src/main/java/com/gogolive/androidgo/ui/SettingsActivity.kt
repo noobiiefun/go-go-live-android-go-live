@@ -5,9 +5,16 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
+import androidx.lifecycle.lifecycleScope
 import com.gogolive.androidgo.R
 import com.gogolive.androidgo.databinding.ActivitySettingsBinding
 import com.gogolive.androidgo.service.ScreenRecordService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.system.measureTimeMillis
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -25,6 +32,63 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnBack.setOnClickListener {
             saveSettings()
             finish()
+        }
+
+        binding.btnSpeedTest.setOnClickListener {
+            runSpeedTest()
+        }
+    }
+
+    private fun runSpeedTest() {
+        binding.btnSpeedTest.isEnabled = false
+        binding.tvSpeedResult.text = getString(R.string.speedtest_running)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val speedMbps = performUploadTest()
+            withContext(Dispatchers.Main) {
+                val recommendation = when {
+                    speedMbps < 0.5 -> getString(R.string.rec_low)
+                    speedMbps < 1.5 -> getString(R.string.rec_360)
+                    speedMbps < 4.0 -> getString(R.string.rec_480)
+                    else -> getString(R.string.rec_720)
+                }
+                binding.tvSpeedResult.text = getString(R.string.speedtest_result, speedMbps, recommendation)
+                binding.btnSpeedTest.isEnabled = true
+            }
+        }
+    }
+
+    private fun performUploadTest(): Double {
+        // Upload 1MB of dummy data to a common endpoint
+        val dataSize = 1 * 1024 * 1024 
+        val dummyData = ByteArray(dataSize) { 0 }
+        
+        return try {
+            val url = URL("https://httpbin.org/post")
+            var bytesUploaded = 0L
+            val timeTaken = measureTimeMillis {
+                val conn = url.openConnection() as HttpURLConnection
+                try {
+                    conn.doOutput = true
+                    conn.requestMethod = "POST"
+                    conn.setFixedLengthStreamingMode(dataSize)
+                    conn.connectTimeout = 10000
+                    conn.readTimeout = 10000
+                    
+                    conn.outputStream.use { it.write(dummyData) }
+                    if (conn.responseCode == 200) {
+                        bytesUploaded = dataSize.toLong()
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+            }
+            
+            if (timeTaken > 0 && bytesUploaded > 0) {
+                (bytesUploaded * 8.0 / 1_000_000.0) / (timeTaken / 1000.0)
+            } else 0.0
+        } catch (e: Exception) {
+            0.0
         }
     }
 
