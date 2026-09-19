@@ -1,14 +1,38 @@
-*.iml
-.gradle
-/local.properties
-/.idea
+# Documentation builds and generated files
+docs/_build/
+docs/build/
+*.log
+*.tmp
+
+# Environment and dependency directories
+.venv/
+venv/
+.env
+.env.local
+.env.*
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# OS generated files
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-*.apk
-*.aab
-/app/build
-/app/release
+Thumbs.db
